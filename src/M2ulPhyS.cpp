@@ -445,10 +445,9 @@ void M2ulPhyS::initVariables() {
   // only need serial mesh if on rank 0 and using single restart file option
   if (!rank0_ || (!config.isRestartSerialized("either"))) delete serial_mesh;
 
-  // Paraview setup
-  paraviewColl = new ParaViewDataCollection(config.GetOutputName(), mesh);
+  // Visualization setup. Default to MFEM's VisIt collection format, stored under outdirBase.
+  paraviewColl = new VisItDataCollection(config.GetOutputName() + "/visit", mesh);
   paraviewColl->SetLevelsOfDetail(config.GetSolutionOrder());
-  paraviewColl->SetHighOrderOutput(true);
   paraviewColl->SetPrecision(8);
 
   // This line is necessary to ensure that GetNodes does not return
@@ -1709,6 +1708,8 @@ void M2ulPhyS::initSolutionAndVisualizationVectors() {
 
   // this variable is purely for visualization
   press = new ParGridFunction(fes);
+  specific_internal_energy_ = new ParGridFunction(fes);
+  sound_speed_ = new ParGridFunction(fes);
 
   passiveScalar = NULL;
   if (eqSystem == NS_PASSIVE) {
@@ -1920,6 +1921,8 @@ void M2ulPhyS::initSolutionAndVisualizationVectors() {
   }
   paraviewColl->RegisterField("temp", temperature);
   paraviewColl->RegisterField("press", press);
+  paraviewColl->RegisterField("specific_internal_energy", specific_internal_energy_);
+  paraviewColl->RegisterField("sound_speed", sound_speed_);
   if (eqSystem == NS_PASSIVE) {
     paraviewColl->RegisterField("passiveScalar", passiveScalar);
   }
@@ -1990,7 +1993,6 @@ void M2ulPhyS::projectInitialSolution() {
 
     paraviewColl->SetCycle(iter);
     paraviewColl->SetTime(time);
-    paraviewColl->UseRestartMode(true);
   }
 
   initGradUp();
@@ -2003,6 +2005,7 @@ void M2ulPhyS::projectInitialSolution() {
 
   // update pressure grid function
   mixture->UpdatePressureGridFunction(press, Up);
+  updateDerivedVisualizationFields();
 
   // update plasma electrical conductivity
   if (tpsP->isFlowEMCoupled()) {
@@ -2077,6 +2080,7 @@ void M2ulPhyS::solveStep() {
       // auto hUp = Up->HostRead();
       Up->HostRead();
       mixture->UpdatePressureGridFunction(press, Up);
+      updateDerivedVisualizationFields();
 
       restart_files_hdf5("write");
 
@@ -2144,6 +2148,7 @@ void M2ulPhyS::solveEnd() {
     // auto hUp = Up->HostRead();
     Up->HostRead();
     mixture->UpdatePressureGridFunction(press, Up);
+    updateDerivedVisualizationFields();
 
     // write_restart_files();
     restart_files_hdf5("write");
@@ -2472,6 +2477,33 @@ void M2ulPhyS::compressibleTGVInitialConditions() {
 double M2ulPhyS::tgvSutherlandViscosity(double temperature) {
   return config.GetViscMult() * config.sutherland_.C1 * std::pow(temperature, 1.5) /
          (temperature + config.sutherland_.S0);
+}
+
+void M2ulPhyS::updateDerivedVisualizationFields() {
+  const double *dataU = U->HostRead();
+  const int dof = vfes->GetNDofs();
+  double *dataEi = specific_internal_energy_->HostWrite();
+  double *dataA = sound_speed_->HostWrite();
+
+  Vector state;
+  state.UseDevice(false);
+  state.SetSize(num_equation);
+
+  for (int i = 0; i < dof; i++) {
+    for (int eq = 0; eq < num_equation; eq++) state(eq) = dataU[i + eq * dof];
+
+    const double rho = state(0);
+    double rho_vel2 = 0.0;
+    for (int d = 0; d < nvel; d++) {
+      const double rhou = state(1 + d);
+      rho_vel2 += rhou * rhou;
+    }
+
+    const double rhoE = state(1 + nvel);
+    const double kinetic_energy_density = (rho > 0.0) ? 0.5 * rho_vel2 / rho : 0.0;
+    dataEi[i] = (rho > 0.0) ? (rhoE - kinetic_energy_density) / rho : 0.0;
+    dataA[i] = mixture->ComputeSpeedOfSound(state, false);
+  }
 }
 
 void M2ulPhyS::writeTGVDiagnostics(bool force_write) {
@@ -4465,6 +4497,7 @@ void M2ulPhyS::visualization() {
 
     // update pressure grid function
     mixture->UpdatePressureGridFunction(press, Up);
+    updateDerivedVisualizationFields();
 
     updateVisualizationVariables();
 

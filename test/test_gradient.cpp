@@ -162,7 +162,7 @@ int main (int argc, char *argv[])
   gradients->computeGradients();
 //   ParGridFunction *rhs = new ParGridFunction(*src_state);
 
-  ParaViewDataCollection *paraviewColl = srcField->GetParaviewColl();
+  DataCollection *paraviewColl = srcField->GetParaviewColl();
 
   std::vector<ParGridFunction *> visualizationVariables((dim + 1) * num_equation);
   for (int func = 0; func < dim + 1; func++) {

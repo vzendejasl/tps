@@ -210,9 +210,8 @@ class M2ulPhyS : public TPS::PlasmaSolver {
   BlockVector *u_block;
   BlockVector *up_block;
 
-  // paraview collection pointer
-  ParaViewDataCollection *paraviewColl = NULL;
-  // DataCollection *visitColl = NULL;
+  // Visualization data collection pointer. Uses VisIt output by default.
+  VisItDataCollection *paraviewColl = NULL;
 
   // Riemann Solver
   RiemannSolverTPS *rsolver;
@@ -239,6 +238,8 @@ class M2ulPhyS : public TPS::PlasmaSolver {
   ParGridFunction *temperature, *dens, *vel, *vtheta, *passiveScalar;
   ParGridFunction *electron_temp_field;
   ParGridFunction *press;
+  ParGridFunction *specific_internal_energy_;
+  ParGridFunction *sound_speed_;
   std::vector<ParGridFunction *> visualizationVariables_;
   std::vector<std::string> visualizationNames_;
   AuxiliaryVisualizationIndexes visualizationIndexes_;
@@ -350,6 +351,7 @@ class M2ulPhyS : public TPS::PlasmaSolver {
   void compressibleTGVInitialConditions();
   void writeTGVDiagnostics(bool force_write = false);
   double tgvSutherlandViscosity(double temperature);
+  void updateDerivedVisualizationFields();
   void initGradUp();
   void initilizeSpeciesFromLTE();
 
@@ -435,7 +437,7 @@ class M2ulPhyS : public TPS::PlasmaSolver {
   RHSoperator *getRHSoperator() { return rhsOperator; }
   ParFiniteElementSpace *GetScalarFES() { return fes; }
   ParFiniteElementSpace *GetVectorFES() { return dfes; }
-  ParaViewDataCollection *GetParaviewColl() { return paraviewColl; }
+  DataCollection *GetParaviewColl() { return paraviewColl; }
   ParGridFunction *GetSolutionGF() { return U; }
   ParGridFunction *getPrimitiveGF() { return Up; }
   ParGridFunction *getGradientGF() { return gradUp; }
