@@ -105,6 +105,7 @@ class M2ulPhyS : public TPS::PlasmaSolver {
 
   // History file
   std::ofstream histFile;
+  std::ofstream tgvDiagFile;
 
   // Number of dimensions
   int dim;
@@ -345,6 +346,10 @@ class M2ulPhyS : public TPS::PlasmaSolver {
   static void testInitialCondition(const Vector &x, Vector &y);
   // void dryAirUniformInitialConditions();
   void uniformInitialConditions();
+  void finalizeCompressibleTGVOptions();
+  void compressibleTGVInitialConditions();
+  void writeTGVDiagnostics(bool force_write = false);
+  double tgvSutherlandViscosity(double temperature);
   void initGradUp();
   void initilizeSpeciesFromLTE();
 

@@ -176,6 +176,23 @@ class RunConfiguration {
   // initial constant field
   double initRhoRhoVp[5];
 
+  // Initial-condition selector. The historical/default value is "constant".
+  // "compressible_tgv" initializes the dry-air compressible Taylor-Green vortex.
+  std::string initialConditionType;
+  bool useCompressibleTGV;
+  double tgvRho0;
+  double tgvU0;
+  double tgvMach;
+  double tgvRe;
+  double tgvLength;
+  double tgvTemperature0;
+  double tgvPressure0;
+  double tgvMu0;
+  bool tgvUsePaperSutherland;
+  bool tgvDiagnosticsEnabled;
+  int tgvDiagnosticsFreq;
+  std::string tgvDiagnosticsFile;
+
   // ic flag to use internal ic function definition
   bool useICFunction;
   bool useICBoxFunction;

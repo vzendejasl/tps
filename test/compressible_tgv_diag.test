@@ -1,0 +1,85 @@
+#!./bats
+# -*- mode: sh -*-
+
+TEST="compressible_tgv_diag"
+RUNFILE="inputs/input.compressible_tgv_m05.ini"
+EXE="../src/tps"
+CHECKER="../../test/check_tgv_diagnostics.py"
+
+setup() {
+    MPIRUN=`./sniff_mpirun.sh`
+}
+
+make_runfile() {
+    local outdir="$1"
+    local runfile="$2"
+    sed "s/outdirBase = tgv_m05_output_test/outdirBase = ${outdir}/" "$RUNFILE" > "$runfile"
+}
+
+cleanup_case() {
+    local outdir="$1"
+    local runfile="$2"
+    rm -rf "$outdir"
+    rm -f "$runfile"
+    rm -f restart_output.sol*.h5
+    rm -f partition.*.h5
+    rm -f history.hist
+}
+
+run_serial_case() {
+    local outdir="$1"
+    local runfile="$2"
+    cleanup_case "$outdir" "$runfile"
+    make_runfile "$outdir" "$runfile"
+    $EXE --runFile "$runfile"
+}
+
+run_parallel_case() {
+    local outdir="$1"
+    local runfile="$2"
+    cleanup_case "$outdir" "$runfile"
+    make_runfile "$outdir" "$runfile"
+    HDF5_USE_FILE_LOCKING=FALSE $MPIRUN -n 4 $EXE --runFile "$runfile"
+}
+
+@test "[$TEST] check for input file, executable, and diagnostics checker" {
+    test -x $EXE
+    test -s $RUNFILE
+    test -s $CHECKER
+}
+
+@test "[$TEST] serial t=0 diagnostics agree with analytic reference" {
+    local outdir="tgv_m05_output_serial_test"
+    local runfile="input.compressible_tgv_m05.serial.ini"
+    run_serial_case "$outdir" "$runfile"
+
+    test -s "$outdir/tgv_diagnostics.csv"
+    python3 "$CHECKER" exact "$outdir/tgv_diagnostics.csv"
+}
+
+@test "[$TEST] parallel t=0 diagnostics agree with analytic reference" {
+    [ "x$MPIRUN" != "x" ] || skip "Cannot launch parallel job"
+
+    local outdir="tgv_m05_output_parallel_test"
+    local runfile="input.compressible_tgv_m05.parallel.ini"
+    run_parallel_case "$outdir" "$runfile"
+
+    test -s "$outdir/tgv_diagnostics.csv"
+    python3 "$CHECKER" exact "$outdir/tgv_diagnostics.csv"
+}
+
+@test "[$TEST] serial and 4-rank t=0 diagnostics match each other" {
+    [ "x$MPIRUN" != "x" ] || skip "Cannot launch parallel job"
+
+    local serial_outdir="tgv_m05_output_serial_compare"
+    local serial_runfile="input.compressible_tgv_m05.serial.compare.ini"
+    local parallel_outdir="tgv_m05_output_parallel_compare"
+    local parallel_runfile="input.compressible_tgv_m05.parallel.compare.ini"
+
+    run_serial_case "$serial_outdir" "$serial_runfile"
+    run_parallel_case "$parallel_outdir" "$parallel_runfile"
+
+    test -s "$serial_outdir/tgv_diagnostics.csv"
+    test -s "$parallel_outdir/tgv_diagnostics.csv"
+    python3 "$CHECKER" compare "$serial_outdir/tgv_diagnostics.csv" "$parallel_outdir/tgv_diagnostics.csv"
+}

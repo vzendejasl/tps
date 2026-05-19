@@ -66,6 +66,21 @@ RunConfiguration::RunConfiguration() {
   refLength = 1.;
   for (int ii = 0; ii < 5; ii++) initRhoRhoVp[ii] = 0.;
 
+  initialConditionType = "constant";
+  useCompressibleTGV = false;
+  tgvRho0 = 1.0;
+  tgvU0 = 1.0;
+  tgvMach = 0.5;
+  tgvRe = -1.0;
+  tgvLength = -1.0;
+  tgvTemperature0 = -1.0;
+  tgvPressure0 = -1.0;
+  tgvMu0 = -1.0;
+  tgvUsePaperSutherland = true;
+  tgvDiagnosticsEnabled = false;
+  tgvDiagnosticsFreq = 1;
+  tgvDiagnosticsFile = "tgv_diagnostics.csv";
+
   linViscData.normal.UseDevice(true);
   linViscData.point0.UseDevice(true);
   linViscData.pointA.UseDevice(true);

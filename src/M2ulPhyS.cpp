@@ -35,6 +35,12 @@
 
 #include "M2ulPhyS.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <iomanip>
+#include <limits>
+#include <sys/stat.h>
+
 #include "gslib_interpolator.hpp"
 #include "utils.hpp"
 #include "wallBC.hpp"
@@ -811,6 +817,33 @@ void M2ulPhyS::initVariables() {
       }
     }
   }
+
+  if (config.useCompressibleTGV && config.tgvDiagnosticsEnabled) {
+    if (rank0_) {
+      mkdir(config.GetOutputName().c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+
+      std::string diagPath = config.tgvDiagnosticsFile;
+      if (!diagPath.empty() && diagPath[0] != '/') {
+        diagPath = config.GetOutputName() + "/" + diagPath;
+      }
+
+      ios_base::openmode mode = std::fstream::trunc;
+      if (config.GetRestartCycle() == 1) mode = std::fstream::app;
+      tgvDiagFile.open(diagPath.c_str(), mode);
+      if (!tgvDiagFile.is_open()) {
+        std::cout << "Could not open TGV diagnostics file: " << diagPath << std::endl;
+      } else if (tgvDiagFile.tellp() == 0) {
+        tgvDiagFile << "time,iter,"
+                    << "kinetic_energy,solenoidal_dissipation,dilatational_dissipation,enstrophy,"
+                    << "pressure_work,viscous_work,viscous_dissipation,"
+                    << "raw_ke_integral,raw_vorticity_integral,raw_weighted_vorticity_integral,"
+                    << "raw_divergence_integral,raw_weighted_divergence_integral,"
+                    << "raw_pressure_dilatation_integral,raw_viscous_dissipation_integral,"
+                    << "min_rho,min_pressure,max_mach,max_abs_divu" << std::endl;
+      }
+    }
+    writeTGVDiagnostics(true);
+  }
 }
 
 void M2ulPhyS::initIndirectionArrays() {
@@ -1532,7 +1565,10 @@ void M2ulPhyS::initIndirectionBC() {
 }
 
 M2ulPhyS::~M2ulPhyS() {
-  if (rank0_) histFile.close();
+  if (rank0_) {
+    histFile.close();
+    if (tgvDiagFile.is_open()) tgvDiagFile.close();
+  }
 
   delete gradUp;
 
@@ -1935,6 +1971,8 @@ void M2ulPhyS::projectInitialSolution() {
 #else
       mfem_error("Require MASA support to use MMS.");
 #endif
+    } else if (config.useCompressibleTGV) {
+      compressibleTGVInitialConditions();
     } else {
       uniformInitialConditions();
     }
@@ -2016,6 +2054,8 @@ void M2ulPhyS::solveStep() {
   }
 
   iter++;
+
+  writeTGVDiagnostics(false);
 
   const int vis_steps = config.GetNumItersOutput();
   if (iter % vis_steps == 0) {
@@ -2288,6 +2328,301 @@ void M2ulPhyS::testInitialCondition(const Vector &x, Vector &y) {
   y(3) = (pres_inf + x(0) + 0.2 * x(1)) / (gamma - 1.) + 0.5 * y(1) * y(1) / y(0);
 
   delete eqState;
+}
+
+void M2ulPhyS::finalizeCompressibleTGVOptions() {
+  if (!config.useCompressibleTGV) return;
+
+  if (config.workFluid != DRY_AIR) {
+    mfem_error("compressible_tgv initial condition currently supports flow/fluid = dry_air only.");
+  }
+  if (config.tgvMach <= 0.0) {
+    mfem_error("initialConditions/tgvMach must be positive.");
+  }
+  if (config.tgvRho0 <= 0.0 || config.tgvU0 <= 0.0) {
+    mfem_error("initialConditions/tgvRho0 and initialConditions/tgvU0 must be positive.");
+  }
+
+  const double gamma = config.dryAirInput.specific_heat_ratio;
+  const double Rgas = config.dryAirInput.gas_constant;
+
+  if (config.tgvLength <= 0.0) config.tgvLength = config.refLength;
+  if (config.tgvPressure0 <= 0.0) {
+    config.tgvPressure0 =
+        config.tgvRho0 * config.tgvU0 * config.tgvU0 / (gamma * config.tgvMach * config.tgvMach);
+  }
+  if (config.tgvTemperature0 <= 0.0) {
+    config.tgvTemperature0 = config.tgvPressure0 / (config.tgvRho0 * Rgas);
+  }
+
+  if (config.tgvRe <= 0.0) {
+    if (config.visc_mult > 0.0) {
+      config.tgvRe = config.tgvRho0 * config.tgvU0 * config.tgvLength / config.visc_mult;
+    } else {
+      mfem_error("initialConditions/tgvRe must be positive when flow/viscosityMultiplier is not usable.");
+    }
+  }
+
+  config.tgvMu0 = config.tgvRho0 * config.tgvU0 * config.tgvLength / config.tgvRe;
+
+  if (config.tgvUsePaperSutherland) {
+    config.sutherland_.C1 = 1.4042 / std::sqrt(config.tgvTemperature0);
+    config.sutherland_.S0 = 0.4042 * config.tgvTemperature0;
+    config.sutherland_.Pr = 0.71;
+    config.visc_mult = config.tgvMu0;
+  }
+
+  if (config.tgvDiagnosticsFreq <= 0) config.tgvDiagnosticsFreq = config.GetNumItersOutput();
+
+  if (rank0_) {
+    std::cout << "Compressible TGV IC enabled" << std::endl;
+    std::cout << "  rho0 = " << config.tgvRho0 << std::endl;
+    std::cout << "  U0   = " << config.tgvU0 << std::endl;
+    std::cout << "  Mach = " << config.tgvMach << std::endl;
+    std::cout << "  Re   = " << config.tgvRe << std::endl;
+    std::cout << "  L    = " << config.tgvLength << std::endl;
+    std::cout << "  p0   = " << config.tgvPressure0 << std::endl;
+    std::cout << "  T0   = " << config.tgvTemperature0 << std::endl;
+    std::cout << "  mu0  = " << config.tgvMu0 << std::endl;
+    if (config.tgvUsePaperSutherland) {
+      std::cout << "  paper Sutherland enabled: C1 = " << config.sutherland_.C1
+                << ", S0 = " << config.sutherland_.S0 << ", Pr = " << config.sutherland_.Pr << std::endl;
+    }
+  }
+}
+
+void M2ulPhyS::compressibleTGVInitialConditions() {
+  if (dim != 3 || nvel != 3) {
+    mfem_error("compressible_tgv requires a 3D non-axisymmetric mesh.");
+  }
+  if (num_equation != nvel + 2) {
+    mfem_error("compressible_tgv expects dry-air Euler/Navier-Stokes variables only: rho, rho*u, rho*v, rho*w, rhoE.");
+  }
+
+  const double gamma = mixture->GetSpecificHeatRatio();
+  const double Rgas = mixture->GetGasConstant();
+  const double rho0 = config.tgvRho0;
+  const double U0 = config.tgvU0;
+  const double L = config.tgvLength;
+  const double p0 = config.tgvPressure0;
+  const double T0 = config.tgvTemperature0;
+
+  double *data = U->HostWrite();
+  double *dataUp = Up->HostWrite();
+  double *dataGradUp = gradUp->HostWrite();
+  const int dof = vfes->GetNDofs();
+
+  for (int i = 0; i < dof * num_equation * dim; i++) dataGradUp[i] = 0.0;
+
+  Array<int> edofs;
+  Vector state(num_equation);
+  Vector prim(num_equation);
+  Vector x(dim);
+
+  for (int e = 0; e < fes->GetNE(); e++) {
+    const FiniteElement *fe = fes->GetFE(e);
+    ElementTransformation *tr = fes->GetElementTransformation(e);
+    const IntegrationRule &nodes = fe->GetNodes();
+    fes->GetElementDofs(e, edofs);
+
+    for (int n = 0; n < fe->GetDof(); n++) {
+      tr->Transform(nodes.IntPoint(n), x);
+      int idx = edofs[n];
+      if (idx < 0) idx = -1 - idx;
+
+      const double sx = std::sin(x[0] / L);
+      const double cx = std::cos(x[0] / L);
+      const double sy = std::sin(x[1] / L);
+      const double cy = std::cos(x[1] / L);
+      const double cz = std::cos(x[2] / L);
+
+      const double u = U0 * sx * cy * cz;
+      const double v = -U0 * cx * sy * cz;
+      const double w = 0.0;
+      const double p = p0 + (rho0 * U0 * U0 / 16.0) *
+                                (std::cos(2.0 * x[0] / L) + std::cos(2.0 * x[1] / L)) *
+                                (2.0 + std::cos(2.0 * x[2] / L));
+      const double rho = p / (Rgas * T0);
+      const double rhoE = p / (gamma - 1.0) + 0.5 * rho * (u * u + v * v + w * w);
+
+      state = 0.0;
+      state[0] = rho;
+      state[1] = rho * u;
+      state[2] = rho * v;
+      state[3] = rho * w;
+      state[4] = rhoE;
+      mixture->GetPrimitivesFromConservatives(state, prim);
+
+      for (int eq = 0; eq < num_equation; eq++) {
+        data[idx + eq * dof] = state[eq];
+        dataUp[idx + eq * dof] = prim[eq];
+      }
+    }
+  }
+
+  U->HostReadWrite();
+  Up->HostReadWrite();
+  gradUp->HostReadWrite();
+
+  if (rank0_) {
+    std::cout << "Projected compressible Taylor-Green vortex initial condition." << std::endl;
+  }
+}
+
+double M2ulPhyS::tgvSutherlandViscosity(double temperature) {
+  return config.GetViscMult() * config.sutherland_.C1 * std::pow(temperature, 1.5) /
+         (temperature + config.sutherland_.S0);
+}
+
+void M2ulPhyS::writeTGVDiagnostics(bool force_write) {
+  if (!config.useCompressibleTGV || !config.tgvDiagnosticsEnabled) return;
+  if (!force_write && (iter % config.tgvDiagnosticsFreq != 0)) return;
+
+  rhsOperator->updateGradients(*U, false);
+
+  const double *dataUp = Up->HostRead();
+  const double *dataGradUp = gradUp->HostRead();
+  const int dof = vfes->GetNDofs();
+
+  const double gamma = mixture->GetSpecificHeatRatio();
+  const double Rgas = mixture->GetGasConstant();
+  const double rho0 = config.tgvRho0;
+  const double U0 = config.tgvU0;
+  const double L = config.tgvLength;
+  const double Re = config.tgvRe;
+  const double mu0 = config.tgvMu0;
+  const double volume = (xmax - xmin) * (ymax - ymin) * (zmax - zmin);
+
+  double local_ke_int = 0.0;
+  double local_omega2_int = 0.0;
+  double local_sol_int = 0.0;
+  double local_div2_int = 0.0;
+  double local_dil_int = 0.0;
+  double local_pressure_dilatation_int = 0.0;
+  double local_visc_diss_int = 0.0;
+  double local_min_rho = std::numeric_limits<double>::max();
+  double local_min_p = std::numeric_limits<double>::max();
+  double local_max_mach = 0.0;
+  double local_max_abs_divu = 0.0;
+
+  Array<int> edofs;
+  Vector shape;
+
+  for (int e = 0; e < fes->GetNE(); e++) {
+    const FiniteElement *fe = fes->GetFE(e);
+    ElementTransformation *tr = fes->GetElementTransformation(e);
+    const int intorder = 2 * fe->GetOrder() + tr->OrderW();
+    const IntegrationRule &ir = intRules->Get(tr->GetGeometryType(), intorder);
+    fes->GetElementDofs(e, edofs);
+    shape.SetSize(fe->GetDof());
+
+    for (int q = 0; q < ir.GetNPoints(); q++) {
+      const IntegrationPoint &ip = ir.IntPoint(q);
+      tr->SetIntPoint(&ip);
+      fe->CalcShape(ip, shape);
+      const double wq = ip.weight * tr->Weight();
+
+      double rho = 0.0;
+      double vel[3] = {0.0, 0.0, 0.0};
+      double temp = 0.0;
+      double grad_vel[3][3] = {{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}};
+
+      for (int n = 0; n < fe->GetDof(); n++) {
+        int idx = edofs[n];
+        if (idx < 0) idx = -1 - idx;
+        const double sh = shape[n];
+        rho += sh * dataUp[idx + 0 * dof];
+        for (int a = 0; a < 3; a++) vel[a] += sh * dataUp[idx + (1 + a) * dof];
+        temp += sh * dataUp[idx + (1 + nvel) * dof];
+
+        for (int a = 0; a < 3; a++) {
+          const int eq = 1 + a;
+          for (int d = 0; d < 3; d++) {
+            grad_vel[a][d] += sh * dataGradUp[idx + eq * dof + d * num_equation * dof];
+          }
+        }
+      }
+
+      const double u2 = vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2];
+      const double pressure = Rgas * rho * temp;
+      const double c = std::sqrt(gamma * Rgas * temp);
+      const double mach = std::sqrt(u2) / c;
+
+      const double divu = grad_vel[0][0] + grad_vel[1][1] + grad_vel[2][2];
+      const double vort_x = grad_vel[2][1] - grad_vel[1][2];
+      const double vort_y = grad_vel[0][2] - grad_vel[2][0];
+      const double vort_z = grad_vel[1][0] - grad_vel[0][1];
+      const double vort2 = vort_x * vort_x + vort_y * vort_y + vort_z * vort_z;
+
+      double S2 = 0.0;
+      for (int a = 0; a < 3; a++) {
+        for (int b = 0; b < 3; b++) {
+          const double Sab = 0.5 * (grad_vel[a][b] + grad_vel[b][a]);
+          S2 += Sab * Sab;
+        }
+      }
+
+      const double mu = tgvSutherlandViscosity(temp);
+      const double mu_ratio = mu / mu0;
+      const double visc_diss = 2.0 * mu * S2 - (2.0 / 3.0) * mu * divu * divu;
+
+      local_ke_int += wq * rho * u2;
+      local_omega2_int += wq * vort2;
+      local_sol_int += wq * mu_ratio * vort2;
+      local_div2_int += wq * divu * divu;
+      local_dil_int += wq * mu_ratio * divu * divu;
+      local_pressure_dilatation_int += wq * pressure * divu;
+      local_visc_diss_int += wq * visc_diss;
+      local_min_rho = std::min(local_min_rho, rho);
+      local_min_p = std::min(local_min_p, pressure);
+      local_max_mach = std::max(local_max_mach, mach);
+      local_max_abs_divu = std::max(local_max_abs_divu, std::abs(divu));
+    }
+  }
+
+  double ke_int = 0.0;
+  double omega2_int = 0.0;
+  double sol_int = 0.0;
+  double div2_int = 0.0;
+  double dil_int = 0.0;
+  double pressure_dilatation_int = 0.0;
+  double visc_diss_int = 0.0;
+  double min_rho = 0.0;
+  double min_p = 0.0;
+  double max_mach = 0.0;
+  double max_abs_divu = 0.0;
+
+  MPI_Allreduce(&local_ke_int, &ke_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
+  MPI_Allreduce(&local_omega2_int, &omega2_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
+  MPI_Allreduce(&local_sol_int, &sol_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
+  MPI_Allreduce(&local_div2_int, &div2_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
+  MPI_Allreduce(&local_dil_int, &dil_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
+  MPI_Allreduce(&local_pressure_dilatation_int, &pressure_dilatation_int, 1, MPI_DOUBLE, MPI_SUM,
+                mesh->GetComm());
+  MPI_Allreduce(&local_visc_diss_int, &visc_diss_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
+  MPI_Allreduce(&local_min_rho, &min_rho, 1, MPI_DOUBLE, MPI_MIN, mesh->GetComm());
+  MPI_Allreduce(&local_min_p, &min_p, 1, MPI_DOUBLE, MPI_MIN, mesh->GetComm());
+  MPI_Allreduce(&local_max_mach, &max_mach, 1, MPI_DOUBLE, MPI_MAX, mesh->GetComm());
+  MPI_Allreduce(&local_max_abs_divu, &max_abs_divu, 1, MPI_DOUBLE, MPI_MAX, mesh->GetComm());
+
+  const double kinetic_energy = ke_int / (2.0 * rho0 * U0 * U0 * volume);
+  const double solenoidal_dissipation = L * L * sol_int / (Re * U0 * U0 * volume);
+  const double dilatational_dissipation = 4.0 * L * L * dil_int / (3.0 * Re * U0 * U0 * volume);
+  const double enstrophy = 0.5 * omega2_int / volume;
+
+  const double budget_scale = L / (rho0 * U0 * U0 * U0 * volume);
+  const double pressure_work = budget_scale * pressure_dilatation_int;
+  const double viscous_dissipation = budget_scale * visc_diss_int;
+  const double viscous_work = -viscous_dissipation;
+
+  if (rank0_ && tgvDiagFile.is_open()) {
+    tgvDiagFile << std::scientific << std::setprecision(16) << time << "," << iter << "," << kinetic_energy << ","
+                << solenoidal_dissipation << "," << dilatational_dissipation << "," << enstrophy << ","
+                << pressure_work << "," << viscous_work << "," << viscous_dissipation << "," << ke_int << ","
+                << omega2_int << "," << sol_int << "," << div2_int << "," << dil_int << ","
+                << pressure_dilatation_int << "," << visc_diss_int << "," << min_rho << "," << min_p << ","
+                << max_mach << "," << max_abs_divu << std::endl;
+  }
 }
 
 // // NOTE: Use only for DRY_AIR.
@@ -2616,6 +2951,7 @@ void M2ulPhyS::parseSolverOptions2() {
   parseFluidPreset();
 
   parseSystemType();
+  finalizeCompressibleTGVOptions();
 
   // plasma conditions.
   config.gasModel = NUM_GASMODEL;
@@ -2843,11 +3179,32 @@ void M2ulPhyS::parseMMSOptions() {
 }
 
 void M2ulPhyS::parseICOptions() {
-  tpsP->getRequiredInput("initialConditions/rho", config.initRhoRhoVp[0]);
-  tpsP->getRequiredInput("initialConditions/rhoU", config.initRhoRhoVp[1]);
-  tpsP->getRequiredInput("initialConditions/rhoV", config.initRhoRhoVp[2]);
-  tpsP->getRequiredInput("initialConditions/rhoW", config.initRhoRhoVp[3]);
-  tpsP->getRequiredInput("initialConditions/pressure", config.initRhoRhoVp[4]);
+  tpsP->getInput("initialConditions/type", config.initialConditionType, std::string("constant"));
+  config.useCompressibleTGV = (config.initialConditionType == "compressible_tgv");
+
+  if (config.useCompressibleTGV) {
+    tpsP->getInput("initialConditions/tgvRho0", config.tgvRho0, 1.0);
+    tpsP->getInput("initialConditions/tgvU0", config.tgvU0, 1.0);
+    tpsP->getInput("initialConditions/tgvMach", config.tgvMach, 0.5);
+    tpsP->getInput("initialConditions/tgvRe", config.tgvRe, -1.0);
+    tpsP->getInput("initialConditions/tgvLength", config.tgvLength, -1.0);
+    tpsP->getInput("initialConditions/tgvTemperature0", config.tgvTemperature0, -1.0);
+    tpsP->getInput("initialConditions/tgvPressure0", config.tgvPressure0, -1.0);
+    tpsP->getInput("initialConditions/tgvUsePaperSutherland", config.tgvUsePaperSutherland, true);
+
+    tpsP->getInput("tgvDiagnostics/enabled", config.tgvDiagnosticsEnabled, true);
+    tpsP->getInput("tgvDiagnostics/frequency", config.tgvDiagnosticsFreq, config.GetNumItersOutput());
+    tpsP->getInput("tgvDiagnostics/file", config.tgvDiagnosticsFile, std::string("tgv_diagnostics.csv"));
+  } else if (config.initialConditionType == "constant") {
+    tpsP->getRequiredInput("initialConditions/rho", config.initRhoRhoVp[0]);
+    tpsP->getRequiredInput("initialConditions/rhoU", config.initRhoRhoVp[1]);
+    tpsP->getRequiredInput("initialConditions/rhoV", config.initRhoRhoVp[2]);
+    tpsP->getRequiredInput("initialConditions/rhoW", config.initRhoRhoVp[3]);
+    tpsP->getRequiredInput("initialConditions/pressure", config.initRhoRhoVp[4]);
+  } else {
+    grvy_printf(GRVY_ERROR, "Unknown initialConditions/type > %s\n", config.initialConditionType.c_str());
+    exit(ERROR);
+  }
 }
 
 void M2ulPhyS::parsePassiveScalarOptions() {
