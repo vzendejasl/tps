@@ -89,7 +89,7 @@ if [ $averages == "yes" ]; then
 fi
 
 # Check species densities (rho-Y*) if requested
-if [ $species == "yes" ]; then
+if [ "${species:-no}" = "yes" ]; then
     all_vars=$(h5ls -s $file1/solution | awk {'print $1'})  # Assumes both files have same variables
     count=0 # count b/c want to throw and error if no species are found
     for v in $all_vars; do

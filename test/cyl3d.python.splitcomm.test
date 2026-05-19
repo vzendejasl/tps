@@ -9,7 +9,15 @@ EXE="./test_tps_splitcomm.py"
 setup() {
     SOLN_FILE=restart_output.sol.h5
     REF_FILE=ref_solns/cyl3d_coarse.4iters.h5
+    REF_FILE_VARP=ref_solns/cyl3d_coarse.8iters.varp.h5
     MPIRUN=`./sniff_mpirun.sh`
+
+    local mfem_dir
+    mfem_dir=$(awk -F' = ' '/^MFEM_DIR = / { print $2; exit }' Makefile)
+    if [ "$(./snarf_mfem.py --version --dir "$mfem_dir")" -ge 40900 ]; then
+        REF_FILE=ref_solns/cyl3d_coarse.4iters.v49.h5
+        REF_FILE_VARP=ref_solns/cyl3d_coarse.8iters.varp.v49.h5
+    fi
 }
 
 @test "[$TEST] check for input file $RUNFILE" {
@@ -106,9 +114,8 @@ setup() {
     run h5dump  -a order  restart_output.sol.h5
     [ "${lines[5]}" = "   (0): 2" ]
 
-    REF_FILE=ref_solns/cyl3d_coarse.8iters.varp.h5
-    test -s $REF_FILE
-    ./soln_differ $SOLN_FILE $REF_FILE
+    test -s $REF_FILE_VARP
+    ./soln_differ $SOLN_FILE $REF_FILE_VARP
 }
 
 @test "[$TEST] verify serial restart consistency using 2 mpi tasks" {

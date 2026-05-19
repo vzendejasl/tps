@@ -22,6 +22,8 @@ AM_LDFLAGS += $(GSL_LIBS)
 endif
 
 TEST_LOG_DRIVER = env AM_TAP_AWK='$(AWK)' $(SHELL) $(top_srcdir)/test/tap-driver.sh
+TEST_EXTENSIONS = .test
+TEST_LOG_COMPILER = ./bats
 
 EXTRA_DIST  = tap-driver.sh test_tps_splitcomm.py soln_differ inputs meshes lte-data rad-data \
 	          ref_solns/*.h5 ref_solns/collisions/*.h5 ref_solns/transport/*.h5 \

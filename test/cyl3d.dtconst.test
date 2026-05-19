@@ -10,6 +10,13 @@ setup() {
     REF_FILE=ref_solns/cyl3d.dtconst.cpu.h5
     REF_FILE_HEAT=ref_solns/cyl3d.dtconst.heatSource.cpu.h5
     MPIRUN=`./sniff_mpirun.sh`
+
+    local mfem_dir
+    mfem_dir=$(awk -F' = ' '/^MFEM_DIR = / { print $2; exit }' Makefile)
+    if [ "$(./snarf_mfem.py --version --dir "$mfem_dir")" -ge 40900 ]; then
+        REF_FILE=ref_solns/cyl3d.dtconst.cpu.v49.h5
+        REF_FILE_HEAT=ref_solns/cyl3d.dtconst.heatSource.cpu.v49.h5
+    fi
 }
 
 @test "[$TEST] check for input file $RUNFILE" {
@@ -69,4 +76,3 @@ setup() {
     test -s $REF_FILE
     ./soln_differ $SOLN_FILE $REF_FILE
 }
-

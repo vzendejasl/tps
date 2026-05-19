@@ -9,6 +9,13 @@ setup() {
     SOLN_FILE=restart_output.sol.h5
     REF_FILE=ref_solns/cyl3d.mflow.2iters.h5
     REF_BULK_FILE=ref_solns/cyl3d.mflow.2iters.bulkVisc.dtconst.h5
+
+    local mfem_dir
+    mfem_dir=$(awk -F' = ' '/^MFEM_DIR = / { print $2; exit }' Makefile)
+    if [ "$(./snarf_mfem.py --version --dir "$mfem_dir")" -ge 40900 ]; then
+        REF_FILE=ref_solns/cyl3d.mflow.2iters.v49.h5
+        REF_BULK_FILE=ref_solns/cyl3d.mflow.2iters.bulkVisc.dtconst.v49.h5
+    fi
 }
 
 @test "[$TEST] check for input file $RUNFILE" {

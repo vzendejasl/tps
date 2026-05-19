@@ -9,10 +9,30 @@ EXE="../src/tps"
 setup() {
     SOLN_FILE=restart_output.sol.h5
     REF_FILE=ref_solns/cyl3d_coarse.4iters.h5
+    REF_FILE_VARP=ref_solns/cyl3d_coarse.8iters.varp.h5
     rm -rf planeData
     mkdir planeData
 
     MPIRUN=`./sniff_mpirun.sh`
+
+    # MFEM 4.9 uses a different hydro reference state for these restart tests.
+    local mfem_dir
+    mfem_dir=$(awk -F' = ' '/^MFEM_DIR = / { print $2; exit }' Makefile)
+    if [ "$(./snarf_mfem.py --version --dir "$mfem_dir")" -ge 40900 ]; then
+        REF_FILE=ref_solns/cyl3d_coarse.4iters.v49.h5
+        REF_FILE_VARP=ref_solns/cyl3d_coarse.8iters.varp.v49.h5
+    fi
+}
+
+portable_sed_in_place() {
+    local expr="$1"
+    local path="$2"
+    local tmp_file="${path}.tmp"
+    sed "$expr" "$path" > "$tmp_file" && mv "$tmp_file" "$path"
+}
+
+mpirun_with_unlocked_hdf5() {
+    HDF5_USE_FILE_LOCKING=FALSE $MPIRUN "$@"
 }
 
 @test "[$TEST] check for input file $RUNFILE" {
@@ -108,9 +128,8 @@ setup() {
     run h5dump  -a order  restart_output.sol.h5
     [ "${lines[5]}" = "   (0): 2" ]
 
-    REF_FILE=ref_solns/cyl3d_coarse.8iters.varp.h5
-    test -s $REF_FILE
-    ./soln_differ $SOLN_FILE $REF_FILE
+    test -s $REF_FILE_VARP
+    ./soln_differ $SOLN_FILE $REF_FILE_VARP
 }
 
 @test "[$TEST] verify singleFileWrite restart consistency using 2 mpi tasks" {
@@ -130,7 +149,7 @@ setup() {
     echo "restartMode = singleFileWrite" >> $RUNFILE_PART
 
     # run 2 tasks
-    $MPIRUN -n 2 $EXE --runFile $RUNFILE_PART
+    mpirun_with_unlocked_hdf5 -n 2 $EXE --runFile $RUNFILE_PART
     test -s $SOLN_FILE_SERIAL
 
     ./soln_differ $SOLN_FILE $REF_FILE
@@ -157,7 +176,7 @@ setup() {
     echo "restartMode = singleFileReadWrite" >> $RUNFILE_PART
 
     # run 2 tasks
-    $MPIRUN -n 2 $EXE --runFile $RUNFILE_PART
+    mpirun_with_unlocked_hdf5 -n 2 $EXE --runFile $RUNFILE_PART
     test -s $SOLN_FILE_SERIAL
 
     ./soln_differ $SOLN_FILE $REF_FILE
@@ -185,7 +204,7 @@ setup() {
 
     # run 4 tasks
     #mpirun -np 4 $EXE --runFile $RUNFILE_PART
-    $MPIRUN -n 4 $EXE --runFile $RUNFILE_PART
+    mpirun_with_unlocked_hdf5 -n 4 $EXE --runFile $RUNFILE_PART
     test -s $SOLN_FILE_SERIAL
 
     ./soln_differ $SOLN_FILE $REF_FILE
@@ -215,7 +234,7 @@ setup() {
     echo "restartMode = singleFileWrite" >> $RUNFILE_MOD
 
     #mpirun -np 2 $EXE --runFile $RUNFILE_MOD
-    $MPIRUN -n 2 $EXE --runFile $RUNFILE_MOD
+    mpirun_with_unlocked_hdf5 -n 2 $EXE --runFile $RUNFILE_MOD
     test -s ${SOLFILE_BASE}.h5
     test -s partition.2p.h5
 
@@ -230,7 +249,7 @@ setup() {
     echo "enableRestart = True" >> $RUNFILE_MOD
 
     #mpirun -np 4 $EXE --runFile $RUNFILE_MOD
-    $MPIRUN -n 4 $EXE --runFile $RUNFILE_MOD
+    mpirun_with_unlocked_hdf5 -n 4 $EXE --runFile $RUNFILE_MOD
     test -s partition.4p.h5
 
     mkdir $TMPDIR_LOC
@@ -244,7 +263,7 @@ setup() {
 
     # finally, run a normal 4 proc case for 4 iterations and compare against above solution
     rm -f  restart_output.sol*.h5
-    $MPIRUN -n 4 $EXE --runFile $RUNFILE
+    mpirun_with_unlocked_hdf5 -n 4 $EXE --runFile $RUNFILE
 
     for i in `seq 0 3`; do
 	test -s ${SOLFILE_BASE}.$i.h5
@@ -268,7 +287,7 @@ setup() {
 
     # run 2 iterations using 2 tasks and save partitioned restart files
     test -s $RUNFILE
-    $MPIRUN -n 2 $EXE --runFile $RUNFILE
+    mpirun_with_unlocked_hdf5 -n 2 $EXE --runFile $RUNFILE
     test -s ${SOLFILE_BASE}.0.h5
     test -s ${SOLFILE_BASE}.1.h5
     test -s partition.2p.h5
@@ -291,7 +310,7 @@ setup() {
     echo "restartMode   = singleFileWrite" >> $RUNFILE_MOD
     echo "enableRestart = True" >> $RUNFILE_MOD
 
-    $MPIRUN -n 2 $EXE --runFile $RUNFILE_MOD
+    mpirun_with_unlocked_hdf5 -n 2 $EXE --runFile $RUNFILE_MOD
     test -s partition.2p.h5
     test -s ${SOLFILE_BASE}.h5
     run h5dump  -a iteration  ${SOLFILE_BASE}.h5
@@ -328,7 +347,7 @@ setup() {
 
     # now, restart and run 1 additional iteration
     sed  's/maxIters = 4/maxIters = 3/' $RUNFILE > $RUNFILE_MOD
-    run $MPIRUN -n 2 $EXE --runFile $RUNFILE_MOD
+    run mpirun_with_unlocked_hdf5 -n 2 $EXE --runFile $RUNFILE_MOD
 
     run h5dump  -a iteration  ${SOLFILE_BASE}.0.h5
     [ "${lines[5]}" = "   (0): 3" ]
@@ -337,7 +356,7 @@ setup() {
     [ "${lines[5]}" = "   (0): 3" ]
 
     # now, repeat and run 1 additional iteration
-    run $MPIRUN -n 2 $EXE --runFile $RUNFILE
+    run mpirun_with_unlocked_hdf5 -n 2 $EXE --runFile $RUNFILE
 
     mkdir $TMPDIR_LOC
 
@@ -350,7 +369,7 @@ setup() {
 
     # finally, run a normal 2 proc case for 4 iterations and compare against above solution
    rm -f  restart_output.sol*.h5
-   $MPIRUN -n 2 $EXE --runFile $RUNFILE
+   mpirun_with_unlocked_hdf5 -n 2 $EXE --runFile $RUNFILE
 
    for i in `seq 0 1`; do
 	test -s ${SOLFILE_BASE}.$i.h5
@@ -381,7 +400,7 @@ setup() {
     echo "restartMode = singleFileReadWrite" >> $RUNFILE_MOD
 
     test -s $RUNFILE
-    $MPIRUN -n 2 $EXE --runFile $RUNFILE_MOD
+    mpirun_with_unlocked_hdf5 -n 2 $EXE --runFile $RUNFILE_MOD
     test -s ${SOLFILE_BASE}.h5
     test -s partition.2p.h5
 
@@ -389,15 +408,15 @@ setup() {
     [ "${lines[5]}" = "   (0): 2" ]
 
     # now, restart and run 1 additional iteration
-    sed -i 's/maxIters = 2/maxIters = 3/' $RUNFILE_MOD
-    run $MPIRUN -n 2 $EXE --runFile $RUNFILE_MOD
+    portable_sed_in_place 's/maxIters = 2/maxIters = 3/' $RUNFILE_MOD
+    run mpirun_with_unlocked_hdf5 -n 2 $EXE --runFile $RUNFILE_MOD
 
     run h5dump  -a iteration  ${SOLFILE_BASE}.h5
     [ "${lines[5]}" = "   (0): 3" ]
 
     # now, repeat and run 1 additional iteration
-    sed -i 's/maxIters = 3/maxIters = 4/' $RUNFILE_MOD
-    run $MPIRUN -n 2 $EXE --runFile $RUNFILE_MOD
+    portable_sed_in_place 's/maxIters = 3/maxIters = 4/' $RUNFILE_MOD
+    run mpirun_with_unlocked_hdf5 -n 2 $EXE --runFile $RUNFILE_MOD
 
     run h5dump  -a iteration  ${SOLFILE_BASE}.h5
     [ "${lines[5]}" = "   (0): 4" ]
@@ -436,16 +455,16 @@ setup() {
 
     # now, restart and run 1 additional iteration using 2 mpi tasks
     echo "enableRestart = True" >> $RUNFILE_MOD
-    sed -i 's/maxIters = 2/maxIters = 3/' $RUNFILE_MOD
-    $MPIRUN -n 2 $EXE --runFile $RUNFILE_MOD
+    portable_sed_in_place 's/maxIters = 2/maxIters = 3/' $RUNFILE_MOD
+    mpirun_with_unlocked_hdf5 -n 2 $EXE --runFile $RUNFILE_MOD
 
     test -s partition.2p.h5
     run h5dump  -a iteration  ${SOLFILE_BASE}.h5
     [ "${lines[5]}" = "   (0): 3" ]
 
     # now, repeat and run 1 additional iteration using 3 mpi tasks
-    sed -i 's/maxIters = 3/maxIters = 4/' $RUNFILE_MOD
-    run $MPIRUN -n 3 $EXE --runFile $RUNFILE_MOD
+    portable_sed_in_place 's/maxIters = 3/maxIters = 4/' $RUNFILE_MOD
+    run mpirun_with_unlocked_hdf5 -n 3 $EXE --runFile $RUNFILE_MOD
 
     test -s partition.3p.h5
     run h5dump  -a iteration  ${SOLFILE_BASE}.h5
