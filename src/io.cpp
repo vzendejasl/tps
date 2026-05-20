@@ -221,7 +221,7 @@ void M2ulPhyS::restart_files_hdf5(string mode, string inputFileName) {
     fileName = groupsMPI->getParallelName(serialName);
   }
 
-  if (rank0_) cout << "HDF5 restart files mode: " << mode << endl;
+  if (rank0_ && !config.useCompressibleTGV) cout << "HDF5 restart files mode: " << mode << endl;
 
   // open restart files
   hid_t file = -1;
@@ -715,7 +715,7 @@ void IOFamily::writePartitioned(hid_t file) {
 
   // save raw data
   for (auto var : vars_) {
-    if (rank0_) grvy_printf(ginfo, "  --> Saving (%s)\n", var.varName_.c_str());
+    if (verbose_ && rank0_) grvy_printf(ginfo, "  --> Saving (%s)\n", var.varName_.c_str());
     write_variable_data_hdf5(group, var.varName_, dataspace, data + var.index_ * dims[0]);
   }
 
@@ -747,7 +747,7 @@ void IOFamily::writeSerial(hid_t file) {
 
     // save raw data
     for (auto var : vars_) {
-      grvy_printf(ginfo, "  --> Saving (%s)\n", var.varName_.c_str());
+      if (verbose_) grvy_printf(ginfo, "  --> Saving (%s)\n", var.varName_.c_str());
       write_variable_data_hdf5(group, var.varName_, dataspace, data + var.index_ * dims[0]);
     }
 
@@ -851,6 +851,7 @@ void IOFamily::readChangeOrder(hid_t file, int read_order) {
 void IODataOrganizer::registerIOFamily(std::string description, std::string group, ParGridFunction *pfunc,
                                        bool auxRestart, bool inRestartFile, FiniteElementCollection *fec) {
   IOFamily family(description, group, pfunc);
+  family.verbose_ = verbose_;
   family.allowsAuxRestart_ = auxRestart;
   family.inRestartFile_ = inRestartFile;
   family.fec_ = fec;
@@ -927,7 +928,7 @@ void IODataOrganizer::write(hid_t file, bool serial) {
 
     assert(nprocs_max > 0);
 
-    if (rank0) {
+    if (verbose_ && rank0) {
       grvy_printf(ginfo, "\nCreating HDF5 group for defined IO families\n");
       grvy_printf(ginfo, "--> %s : %s\n", fam.group_.c_str(), fam.description_.c_str());
     }
@@ -938,6 +939,13 @@ void IODataOrganizer::write(hid_t file, bool serial) {
     } else {
       fam.writePartitioned(file);
     }
+  }
+}
+
+void IODataOrganizer::setVerbose(bool verbose) {
+  verbose_ = verbose;
+  for (auto &fam : families_) {
+    fam.verbose_ = verbose;
   }
 }
 

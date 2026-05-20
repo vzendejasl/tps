@@ -106,6 +106,37 @@ class M2ulPhyS : public TPS::PlasmaSolver {
   // History file
   std::ofstream histFile;
   std::ofstream tgvDiagFile;
+  std::ofstream tgvDiagBudgetFile;
+  std::ofstream tgvDiagIntegralsFile;
+  std::ofstream tgvDiagExtremaFile;
+
+  struct TGVDiagnosticState {
+    double kinetic_energy = 0.0;
+    double solenoidal_dissipation = 0.0;
+    double dilatational_dissipation = 0.0;
+    double enstrophy = 0.0;
+    double pressure_work = 0.0;
+    double viscous_work = 0.0;
+    double viscous_dissipation = 0.0;
+    double raw_ke_integral = 0.0;
+    double raw_vorticity_integral = 0.0;
+    double raw_weighted_vorticity_integral = 0.0;
+    double raw_divergence_integral = 0.0;
+    double raw_weighted_divergence_integral = 0.0;
+    double raw_pressure_dilatation_integral = 0.0;
+    double raw_viscous_dissipation_integral = 0.0;
+    double min_rho = 0.0;
+    double min_pressure = 0.0;
+    double max_mach = 0.0;
+    double max_abs_divu = 0.0;
+    double pressure_l1 = 0.0;
+    double density_l1 = 0.0;
+    double velocity_magnitude_l1 = 0.0;
+    double sound_speed_l1 = 0.0;
+  };
+  TGVDiagnosticState latestTGVDiagnostics_;
+  bool latestTGVDiagnosticsValid_ = false;
+  bool tgvScreenHeaderPrinted_ = false;
 
   // Number of dimensions
   int dim;
@@ -349,7 +380,10 @@ class M2ulPhyS : public TPS::PlasmaSolver {
   void uniformInitialConditions();
   void finalizeCompressibleTGVOptions();
   void compressibleTGVInitialConditions();
+  void computeTGVDiagnostics(TGVDiagnosticState &diag);
   void writeTGVDiagnostics(bool force_write = false);
+  std::string getTGVSidecarDiagnosticPath(const std::string &summary_path, const std::string &suffix) const;
+  void printTGVScreenProgress(bool force_header = false);
   double tgvSutherlandViscosity(double temperature);
   void updateDerivedVisualizationFields();
   void initGradUp();

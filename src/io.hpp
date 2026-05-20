@@ -116,6 +116,9 @@ class IOFamily {
   /** Indicates whether current mpi rank is rank 0*/
   bool rank0_ = false;
 
+  /** Controls screen output during read/write */
+  bool verbose_ = true;
+
   /** Local number of elements in this mpi rank */
   int local_ne_ = -1;
 
@@ -242,6 +245,9 @@ class IODataOrganizer {
   /** Registered IO families */
   std::vector<IOFamily> families_;
 
+  /** Controls screen output during read/write */
+  bool verbose_ = true;
+
   /** Get the index of the IOFamily with group name group */
   int getIOFamilyIndex(std::string group) const;
 
@@ -283,6 +289,9 @@ class IODataOrganizer {
    * @param part Map from global element index to mpi rank owning that element
    */
   void initializeSerial(bool root, bool serial, mfem::Mesh *serial_mesh, int *locToGlob, mfem::Array<int> *part);
+
+  /** Enable or disable screen output for all registered families */
+  void setVerbose(bool verbose);
 
   /**
    * @brief Write data from all families

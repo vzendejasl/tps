@@ -69,7 +69,7 @@ These are the exact values of the quantities written by
 | `max_mach` | `5.0000000000000000e-01` |
 | `max_abs_divu` | `0` |
 
-## Continuum vs. emitted CSV
+## Continuum vs. emitted CSV files
 
 The solver does not integrate the analytic field directly. It
 
@@ -82,6 +82,18 @@ continuum values above. The regression test checks the emitted row against these
 reference values with tolerances chosen to cover the current projection and
 quadrature error on the provided mesh, and separately checks that serial and MPI
 emit the same `t=0` row.
+
+The TGV diagnostics are now split across four CSV files that all use scientific
+formatting with `std::scientific << std::setprecision(16)`:
+
+- summary: `tgv_diagnostics.csv`
+- budget terms: `tgv_diagnostics_budget.csv`
+- raw integrals: `tgv_diagnostics_integrals.csv`
+- extrema/monitoring: `tgv_diagnostics_extrema.csv`
+
+The configured `tgvDiagnostics/file` entry is the summary file name. The other
+three files are written next to it using the same basename plus the suffixes
+above.
 
 ## Files changed for this work
 

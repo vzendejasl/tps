@@ -344,7 +344,7 @@ void M2ulPhyS::initVariables() {
 
   } else {
     // remove previous solution
-    if (rank0_) {
+    if (rank0_ && file_exists(config.GetOutputName())) {
       string command = "rm -r ";
       command.append(config.GetOutputName());
       int err = system(command.c_str());
@@ -817,31 +817,65 @@ void M2ulPhyS::initVariables() {
     }
   }
 
+  ioData.setVerbose(!config.useCompressibleTGV);
+
   if (config.useCompressibleTGV && config.tgvDiagnosticsEnabled) {
     if (rank0_) {
       mkdir(config.GetOutputName().c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 
-      std::string diagPath = config.tgvDiagnosticsFile;
-      if (!diagPath.empty() && diagPath[0] != '/') {
-        diagPath = config.GetOutputName() + "/" + diagPath;
+      std::string summaryPath = config.tgvDiagnosticsFile;
+      if (!summaryPath.empty() && summaryPath[0] != '/') {
+        summaryPath = config.GetOutputName() + "/" + summaryPath;
       }
+      const std::string budgetPath = getTGVSidecarDiagnosticPath(summaryPath, "_budget");
+      const std::string integralsPath = getTGVSidecarDiagnosticPath(summaryPath, "_integrals");
+      const std::string extremaPath = getTGVSidecarDiagnosticPath(summaryPath, "_extrema");
 
       ios_base::openmode mode = std::fstream::trunc;
       if (config.GetRestartCycle() == 1) mode = std::fstream::app;
-      tgvDiagFile.open(diagPath.c_str(), mode);
-      if (!tgvDiagFile.is_open()) {
-        std::cout << "Could not open TGV diagnostics file: " << diagPath << std::endl;
-      } else if (tgvDiagFile.tellp() == 0) {
-        tgvDiagFile << "time,iter,"
-                    << "kinetic_energy,solenoidal_dissipation,dilatational_dissipation,enstrophy,"
-                    << "pressure_work,viscous_work,viscous_dissipation,"
-                    << "raw_ke_integral,raw_vorticity_integral,raw_weighted_vorticity_integral,"
-                    << "raw_divergence_integral,raw_weighted_divergence_integral,"
-                    << "raw_pressure_dilatation_integral,raw_viscous_dissipation_integral,"
-                    << "min_rho,min_pressure,max_mach,max_abs_divu" << std::endl;
-      }
+      tgvDiagFile.open(summaryPath.c_str(), mode);
+      tgvDiagBudgetFile.open(budgetPath.c_str(), mode);
+      tgvDiagIntegralsFile.open(integralsPath.c_str(), mode);
+      tgvDiagExtremaFile.open(extremaPath.c_str(), mode);
+
+      auto write_header_if_new = [&](std::ofstream &stream, const std::string &path,
+                                     const std::vector<std::string> &labels) {
+        if (!stream.is_open()) {
+          std::cout << "Could not open TGV diagnostics file: " << path << std::endl;
+          return;
+        }
+        constexpr int time_width = 25;
+        constexpr int iter_width = 8;
+        constexpr int value_width = 25;
+        stream << std::scientific << std::setprecision(16);
+        if (stream.tellp() == 0) {
+          for (std::size_t i = 0; i < labels.size(); ++i) {
+            const int width = (i == 0) ? time_width : (i == 1 ? iter_width : value_width);
+            if (i > 0) stream << ",";
+            stream << std::right << std::setw(width) << labels[i];
+          }
+          stream << std::endl;
+        }
+      };
+
+      write_header_if_new(tgvDiagFile, summaryPath,
+                          {"time", "iter", "kinetic_energy", "solenoidal_dissipation",
+                           "dilatational_dissipation", "enstrophy"});
+      write_header_if_new(tgvDiagBudgetFile, budgetPath,
+                          {"time", "iter", "pressure_work", "viscous_work", "viscous_dissipation"});
+      write_header_if_new(tgvDiagIntegralsFile, integralsPath,
+                          {"time", "iter", "raw_ke_integral", "raw_vorticity_integral",
+                           "raw_weighted_vorticity_integral", "raw_divergence_integral",
+                           "raw_weighted_divergence_integral", "raw_pressure_dilatation_integral",
+                           "raw_viscous_dissipation_integral"});
+      write_header_if_new(tgvDiagExtremaFile, extremaPath,
+                          {"time", "iter", "min_rho", "min_pressure", "max_mach", "max_abs_divu"});
     }
     writeTGVDiagnostics(true);
+  }
+
+  if (config.useCompressibleTGV) {
+    printTGVScreenProgress(true);
   }
 }
 
@@ -1567,6 +1601,9 @@ M2ulPhyS::~M2ulPhyS() {
   if (rank0_) {
     histFile.close();
     if (tgvDiagFile.is_open()) tgvDiagFile.close();
+    if (tgvDiagBudgetFile.is_open()) tgvDiagBudgetFile.close();
+    if (tgvDiagIntegralsFile.is_open()) tgvDiagIntegralsFile.close();
+    if (tgvDiagExtremaFile.is_open()) tgvDiagExtremaFile.close();
   }
 
   delete gradUp;
@@ -1958,7 +1995,7 @@ void M2ulPhyS::projectInitialSolution() {
   //     VectorFunctionCoefficient u0(num_equation, initialConditionFunction);
   //     U->ProjectCoefficient(u0);
   //   }
-  if (rank0_) std::cout << "restart: " << config.GetRestartCycle() << std::endl;
+  if (rank0_ && !config.useCompressibleTGV) std::cout << "restart: " << config.GetRestartCycle() << std::endl;
 
 #ifdef HAVE_MASA
   if (config.use_mms_) {
@@ -2059,6 +2096,9 @@ void M2ulPhyS::solveStep() {
   iter++;
 
   writeTGVDiagnostics(false);
+  if (config.useCompressibleTGV) {
+    printTGVScreenProgress();
+  }
 
   const int vis_steps = config.GetNumItersOutput();
   if (iter % vis_steps == 0) {
@@ -2070,10 +2110,14 @@ void M2ulPhyS::solveStep() {
       }
       checkSolutionError(time);
     } else {
-      if (rank0_) cout << "time step: " << iter << ", physical time " << time << "s" << endl;
+      if (!config.useCompressibleTGV && rank0_) {
+        cout << "time step: " << iter << ", physical time " << time << "s" << endl;
+      }
     }
 #else
-    if (rank0_) cout << "time step: " << iter << ", physical time " << time << "s" << endl;
+    if (!config.useCompressibleTGV && rank0_) {
+      cout << "time step: " << iter << ", physical time " << time << "s" << endl;
+    }
 #endif
 
     if (iter != MaxIters) {
@@ -2091,6 +2135,15 @@ void M2ulPhyS::solveStep() {
       Up->ReadWrite();  // sets memory to GPU
 
       average->writeViz(iter, time, config.isMeanHistEnabled());
+
+      if (config.useCompressibleTGV && rank0_) {
+        std::ios::fmtflags old_flags = std::cout.flags();
+        std::streamsize old_precision = std::cout.precision();
+        std::cout << "checkpoint: cycle " << iter << ", time " << std::scientific << std::setprecision(6) << time
+                  << "s" << std::endl;
+        std::cout.flags(old_flags);
+        std::cout.precision(old_precision);
+      }
     }
 
     // make a separate routine! plane interp and dump here
@@ -2159,6 +2212,15 @@ void M2ulPhyS::solveEnd() {
 
     average->writeViz(iter, time, config.isMeanHistEnabled());
 
+    if (config.useCompressibleTGV && rank0_) {
+      std::ios::fmtflags old_flags = std::cout.flags();
+      std::streamsize old_precision = std::cout.precision();
+      std::cout << "checkpoint: cycle " << iter << ", time " << std::scientific << std::setprecision(6) << time
+                << "s (final)" << std::endl;
+      std::cout.flags(old_flags);
+      std::cout.precision(old_precision);
+    }
+
 #ifndef HAVE_MASA
     // // If HAVE_MASA is defined, this is handled above
     // void (*initialConditionFunction)(const Vector &, Vector &);
@@ -2194,7 +2256,9 @@ void M2ulPhyS::solve() {
     if ((iter % config.timingFreq) == 0) {
       if (rank0_) {
         double timePerIter = (grvy_timer_elapsed_global() - tlast) / config.timingFreq;
-        grvy_printf(ginfo, "Iteration = %i: wall clock time/iter = %.3f (secs)\n", iter, timePerIter);
+        if (!config.useCompressibleTGV) {
+          grvy_printf(ginfo, "Iteration = %i: wall clock time/iter = %.3f (secs)\n", iter, timePerIter);
+        }
         tlast = grvy_timer_elapsed_global();
       }
     }
@@ -2479,6 +2543,14 @@ double M2ulPhyS::tgvSutherlandViscosity(double temperature) {
          (temperature + config.sutherland_.S0);
 }
 
+std::string M2ulPhyS::getTGVSidecarDiagnosticPath(const std::string &summary_path, const std::string &suffix) const {
+  const std::size_t dot = summary_path.rfind('.');
+  if (dot == std::string::npos || dot == 0) {
+    return summary_path + suffix;
+  }
+  return summary_path.substr(0, dot) + suffix + summary_path.substr(dot);
+}
+
 void M2ulPhyS::updateDerivedVisualizationFields() {
   const double *dataU = U->HostRead();
   const int dof = vfes->GetNDofs();
@@ -2506,10 +2578,7 @@ void M2ulPhyS::updateDerivedVisualizationFields() {
   }
 }
 
-void M2ulPhyS::writeTGVDiagnostics(bool force_write) {
-  if (!config.useCompressibleTGV || !config.tgvDiagnosticsEnabled) return;
-  if (!force_write && (iter % config.tgvDiagnosticsFreq != 0)) return;
-
+void M2ulPhyS::computeTGVDiagnostics(TGVDiagnosticState &diag) {
   rhsOperator->updateGradients(*U, false);
 
   const double *dataUp = Up->HostRead();
@@ -2532,6 +2601,10 @@ void M2ulPhyS::writeTGVDiagnostics(bool force_write) {
   double local_dil_int = 0.0;
   double local_pressure_dilatation_int = 0.0;
   double local_visc_diss_int = 0.0;
+  double local_pressure_l1_int = 0.0;
+  double local_density_l1_int = 0.0;
+  double local_velocity_magnitude_l1_int = 0.0;
+  double local_sound_speed_l1_int = 0.0;
   double local_min_rho = std::numeric_limits<double>::max();
   double local_min_p = std::numeric_limits<double>::max();
   double local_max_mach = 0.0;
@@ -2605,6 +2678,10 @@ void M2ulPhyS::writeTGVDiagnostics(bool force_write) {
       local_dil_int += wq * mu_ratio * divu * divu;
       local_pressure_dilatation_int += wq * pressure * divu;
       local_visc_diss_int += wq * visc_diss;
+      local_pressure_l1_int += wq * std::abs(pressure);
+      local_density_l1_int += wq * std::abs(rho);
+      local_velocity_magnitude_l1_int += wq * std::sqrt(u2);
+      local_sound_speed_l1_int += wq * std::abs(c);
       local_min_rho = std::min(local_min_rho, rho);
       local_min_p = std::min(local_min_p, pressure);
       local_max_mach = std::max(local_max_mach, mach);
@@ -2619,6 +2696,10 @@ void M2ulPhyS::writeTGVDiagnostics(bool force_write) {
   double dil_int = 0.0;
   double pressure_dilatation_int = 0.0;
   double visc_diss_int = 0.0;
+  double pressure_l1_int = 0.0;
+  double density_l1_int = 0.0;
+  double velocity_magnitude_l1_int = 0.0;
+  double sound_speed_l1_int = 0.0;
   double min_rho = 0.0;
   double min_p = 0.0;
   double max_mach = 0.0;
@@ -2632,28 +2713,137 @@ void M2ulPhyS::writeTGVDiagnostics(bool force_write) {
   MPI_Allreduce(&local_pressure_dilatation_int, &pressure_dilatation_int, 1, MPI_DOUBLE, MPI_SUM,
                 mesh->GetComm());
   MPI_Allreduce(&local_visc_diss_int, &visc_diss_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
+  MPI_Allreduce(&local_pressure_l1_int, &pressure_l1_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
+  MPI_Allreduce(&local_density_l1_int, &density_l1_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
+  MPI_Allreduce(&local_velocity_magnitude_l1_int, &velocity_magnitude_l1_int, 1, MPI_DOUBLE, MPI_SUM,
+                mesh->GetComm());
+  MPI_Allreduce(&local_sound_speed_l1_int, &sound_speed_l1_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
   MPI_Allreduce(&local_min_rho, &min_rho, 1, MPI_DOUBLE, MPI_MIN, mesh->GetComm());
   MPI_Allreduce(&local_min_p, &min_p, 1, MPI_DOUBLE, MPI_MIN, mesh->GetComm());
   MPI_Allreduce(&local_max_mach, &max_mach, 1, MPI_DOUBLE, MPI_MAX, mesh->GetComm());
   MPI_Allreduce(&local_max_abs_divu, &max_abs_divu, 1, MPI_DOUBLE, MPI_MAX, mesh->GetComm());
 
-  const double kinetic_energy = ke_int / (2.0 * rho0 * U0 * U0 * volume);
-  const double solenoidal_dissipation = L * L * sol_int / (Re * U0 * U0 * volume);
-  const double dilatational_dissipation = 4.0 * L * L * dil_int / (3.0 * Re * U0 * U0 * volume);
-  const double enstrophy = 0.5 * omega2_int / volume;
+  diag.kinetic_energy = ke_int / (2.0 * rho0 * U0 * U0 * volume);
+  diag.solenoidal_dissipation = L * L * sol_int / (Re * U0 * U0 * volume);
+  diag.dilatational_dissipation = 4.0 * L * L * dil_int / (3.0 * Re * U0 * U0 * volume);
+  diag.enstrophy = 0.5 * omega2_int / volume;
 
   const double budget_scale = L / (rho0 * U0 * U0 * U0 * volume);
-  const double pressure_work = budget_scale * pressure_dilatation_int;
-  const double viscous_dissipation = budget_scale * visc_diss_int;
-  const double viscous_work = -viscous_dissipation;
+  diag.pressure_work = budget_scale * pressure_dilatation_int;
+  diag.viscous_dissipation = budget_scale * visc_diss_int;
+  diag.viscous_work = -diag.viscous_dissipation;
+  diag.raw_ke_integral = ke_int;
+  diag.raw_vorticity_integral = omega2_int;
+  diag.raw_weighted_vorticity_integral = sol_int;
+  diag.raw_divergence_integral = div2_int;
+  diag.raw_weighted_divergence_integral = dil_int;
+  diag.raw_pressure_dilatation_integral = pressure_dilatation_int;
+  diag.raw_viscous_dissipation_integral = visc_diss_int;
+  diag.min_rho = min_rho;
+  diag.min_pressure = min_p;
+  diag.max_mach = max_mach;
+  diag.max_abs_divu = max_abs_divu;
+  diag.pressure_l1 = pressure_l1_int / volume;
+  diag.density_l1 = density_l1_int / volume;
+  diag.velocity_magnitude_l1 = velocity_magnitude_l1_int / volume;
+  diag.sound_speed_l1 = sound_speed_l1_int / volume;
+}
 
-  if (rank0_ && tgvDiagFile.is_open()) {
-    tgvDiagFile << std::scientific << std::setprecision(16) << time << "," << iter << "," << kinetic_energy << ","
-                << solenoidal_dissipation << "," << dilatational_dissipation << "," << enstrophy << ","
-                << pressure_work << "," << viscous_work << "," << viscous_dissipation << "," << ke_int << ","
-                << omega2_int << "," << sol_int << "," << div2_int << "," << dil_int << ","
-                << pressure_dilatation_int << "," << visc_diss_int << "," << min_rho << "," << min_p << ","
-                << max_mach << "," << max_abs_divu << std::endl;
+void M2ulPhyS::printTGVScreenProgress(bool force_header) {
+  if (!config.useCompressibleTGV || !rank0_) return;
+  const int dt_width = 18;
+  const int time_width = 18;
+  const int cycle_width = 10;
+  const int value_width = 18;
+
+  if (!latestTGVDiagnosticsValid_) {
+    computeTGVDiagnostics(latestTGVDiagnostics_);
+    latestTGVDiagnosticsValid_ = true;
+  }
+
+  if (!tgvScreenHeaderPrinted_ || force_header) {
+    const int total_width = dt_width + time_width + cycle_width + 5 * value_width;
+    std::cout << std::endl
+              << std::right
+              << std::setw(dt_width) << "dt"
+              << std::setw(time_width) << "time"
+              << std::setw(cycle_width) << "cycle"
+              << std::setw(value_width) << "KE"
+              << std::setw(value_width) << "p_L1"
+              << std::setw(value_width) << "rho_L1"
+              << std::setw(value_width) << "|u|_L1"
+              << std::setw(value_width) << "a_L1" << std::endl
+              << std::string(total_width, '-') << std::endl;
+    tgvScreenHeaderPrinted_ = true;
+  }
+
+  std::ios::fmtflags old_flags = std::cout.flags();
+  std::streamsize old_precision = std::cout.precision();
+  std::cout << std::right << std::scientific << std::setprecision(6)
+            << std::setw(dt_width) << dt
+            << std::setw(time_width) << time
+            << std::setw(cycle_width) << iter
+            << std::setw(value_width) << latestTGVDiagnostics_.kinetic_energy
+            << std::setw(value_width) << latestTGVDiagnostics_.pressure_l1
+            << std::setw(value_width) << latestTGVDiagnostics_.density_l1
+            << std::setw(value_width) << latestTGVDiagnostics_.velocity_magnitude_l1
+            << std::setw(value_width) << latestTGVDiagnostics_.sound_speed_l1 << std::endl;
+  std::cout.flags(old_flags);
+  std::cout.precision(old_precision);
+}
+
+void M2ulPhyS::writeTGVDiagnostics(bool force_write) {
+  if (!config.useCompressibleTGV) return;
+
+  computeTGVDiagnostics(latestTGVDiagnostics_);
+  latestTGVDiagnosticsValid_ = true;
+
+  if (!config.tgvDiagnosticsEnabled) return;
+  if (!force_write && (iter % config.tgvDiagnosticsFreq != 0)) return;
+
+  if (rank0_) {
+    auto write_csv_row_prefix = [&](std::ofstream &stream) {
+      constexpr int time_width = 25;
+      constexpr int iter_width = 8;
+      stream << std::scientific << std::setprecision(16) << std::right << std::setw(time_width) << time << ","
+             << std::setw(iter_width) << iter;
+    };
+
+    if (tgvDiagFile.is_open()) {
+      constexpr int value_width = 25;
+      write_csv_row_prefix(tgvDiagFile);
+      tgvDiagFile << "," << std::setw(value_width) << latestTGVDiagnostics_.kinetic_energy << ","
+                  << std::setw(value_width) << latestTGVDiagnostics_.solenoidal_dissipation << ","
+                  << std::setw(value_width) << latestTGVDiagnostics_.dilatational_dissipation << ","
+                  << std::setw(value_width) << latestTGVDiagnostics_.enstrophy << std::endl;
+    }
+    if (tgvDiagBudgetFile.is_open()) {
+      constexpr int value_width = 25;
+      write_csv_row_prefix(tgvDiagBudgetFile);
+      tgvDiagBudgetFile << "," << std::setw(value_width) << latestTGVDiagnostics_.pressure_work << ","
+                        << std::setw(value_width) << latestTGVDiagnostics_.viscous_work << ","
+                        << std::setw(value_width) << latestTGVDiagnostics_.viscous_dissipation << std::endl;
+    }
+    if (tgvDiagIntegralsFile.is_open()) {
+      constexpr int value_width = 25;
+      write_csv_row_prefix(tgvDiagIntegralsFile);
+      tgvDiagIntegralsFile << "," << std::setw(value_width) << latestTGVDiagnostics_.raw_ke_integral << ","
+                           << std::setw(value_width) << latestTGVDiagnostics_.raw_vorticity_integral << ","
+                           << std::setw(value_width) << latestTGVDiagnostics_.raw_weighted_vorticity_integral << ","
+                           << std::setw(value_width) << latestTGVDiagnostics_.raw_divergence_integral << ","
+                           << std::setw(value_width) << latestTGVDiagnostics_.raw_weighted_divergence_integral << ","
+                           << std::setw(value_width) << latestTGVDiagnostics_.raw_pressure_dilatation_integral << ","
+                           << std::setw(value_width) << latestTGVDiagnostics_.raw_viscous_dissipation_integral
+                           << std::endl;
+    }
+    if (tgvDiagExtremaFile.is_open()) {
+      constexpr int value_width = 25;
+      write_csv_row_prefix(tgvDiagExtremaFile);
+      tgvDiagExtremaFile << "," << std::setw(value_width) << latestTGVDiagnostics_.min_rho << ","
+                         << std::setw(value_width) << latestTGVDiagnostics_.min_pressure << ","
+                         << std::setw(value_width) << latestTGVDiagnostics_.max_mach << ","
+                         << std::setw(value_width) << latestTGVDiagnostics_.max_abs_divu << std::endl;
+    }
   }
 }
 

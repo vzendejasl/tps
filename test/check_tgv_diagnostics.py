@@ -2,6 +2,7 @@
 
 import csv
 import math
+import os
 import sys
 
 
@@ -11,11 +12,39 @@ def load_first_row(path):
         row = next(reader)
     out = {}
     for key, value in row.items():
-        if key == "iter":
-            out[key] = int(value)
+        clean_key = key.strip()
+        clean_value = value.strip()
+        if clean_key == "iter":
+            out[clean_key] = int(clean_value)
         else:
-            out[key] = float(value)
+            out[clean_key] = float(clean_value)
     return out
+
+
+def sidecar_path(summary_path, suffix):
+    root, ext = os.path.splitext(summary_path)
+    if ext:
+        return root + suffix + ext
+    return summary_path + suffix
+
+
+def load_grouped_first_row(summary_path):
+    paths = [
+        summary_path,
+        sidecar_path(summary_path, "_budget"),
+        sidecar_path(summary_path, "_integrals"),
+        sidecar_path(summary_path, "_extrema"),
+    ]
+    merged = {}
+    for path in paths:
+        row = load_first_row(path)
+        for key, value in row.items():
+            if key in ("time", "iter") and key in merged:
+                if merged[key] != value:
+                    fail(f"inconsistent {key} between grouped diagnostics in {path}")
+                continue
+            merged[key] = value
+    return merged
 
 
 def exact_reference():
@@ -79,7 +108,7 @@ def fail(message):
 
 
 def check_exact(path):
-    got = load_first_row(path)
+    got = load_grouped_first_row(path)
     ref = exact_reference()
     errors = []
 
@@ -98,8 +127,8 @@ def check_exact(path):
 
 
 def check_compare(path_a, path_b):
-    a = load_first_row(path_a)
-    b = load_first_row(path_b)
+    a = load_grouped_first_row(path_a)
+    b = load_grouped_first_row(path_b)
     errors = []
 
     for key in a:

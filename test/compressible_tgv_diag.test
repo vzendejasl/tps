@@ -54,6 +54,9 @@ run_parallel_case() {
     run_serial_case "$outdir" "$runfile"
 
     test -s "$outdir/tgv_diagnostics.csv"
+    test -s "$outdir/tgv_diagnostics_budget.csv"
+    test -s "$outdir/tgv_diagnostics_integrals.csv"
+    test -s "$outdir/tgv_diagnostics_extrema.csv"
     python3 "$CHECKER" exact "$outdir/tgv_diagnostics.csv"
 }
 
@@ -65,6 +68,9 @@ run_parallel_case() {
     run_parallel_case "$outdir" "$runfile"
 
     test -s "$outdir/tgv_diagnostics.csv"
+    test -s "$outdir/tgv_diagnostics_budget.csv"
+    test -s "$outdir/tgv_diagnostics_integrals.csv"
+    test -s "$outdir/tgv_diagnostics_extrema.csv"
     python3 "$CHECKER" exact "$outdir/tgv_diagnostics.csv"
 }
 
@@ -80,6 +86,12 @@ run_parallel_case() {
     run_parallel_case "$parallel_outdir" "$parallel_runfile"
 
     test -s "$serial_outdir/tgv_diagnostics.csv"
+    test -s "$serial_outdir/tgv_diagnostics_budget.csv"
+    test -s "$serial_outdir/tgv_diagnostics_integrals.csv"
+    test -s "$serial_outdir/tgv_diagnostics_extrema.csv"
     test -s "$parallel_outdir/tgv_diagnostics.csv"
+    test -s "$parallel_outdir/tgv_diagnostics_budget.csv"
+    test -s "$parallel_outdir/tgv_diagnostics_integrals.csv"
+    test -s "$parallel_outdir/tgv_diagnostics_extrema.csv"
     python3 "$CHECKER" compare "$serial_outdir/tgv_diagnostics.csv" "$parallel_outdir/tgv_diagnostics.csv"
 }
