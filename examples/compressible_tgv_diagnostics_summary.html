@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Compressible TGV Diagnostics Summary</title>
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['\\(', '\\)']],
+        displayMath: [['\\[', '\\]']]
+      },
+      svg: {
+        fontCache: 'global'
+      }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+  <style>
+    :root {
+      --bg: #f7f4ec;
+      --panel: #fffdf8;
+      --ink: #1f1a14;
+      --muted: #6f665c;
+      --line: #d8cfc2;
+      --accent: #9b4d20;
+      --code: #f2ede3;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      background: linear-gradient(180deg, #f3efe6 0%, #f9f6f0 100%);
+      color: var(--ink);
+      line-height: 1.55;
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 24px 72px;
+    }
+    h1, h2, h3 {
+      line-height: 1.15;
+      margin: 0 0 12px;
+    }
+    h1 {
+      font-size: 2.3rem;
+      margin-bottom: 16px;
+    }
+    h2 {
+      font-size: 1.45rem;
+      margin-top: 36px;
+      padding-top: 10px;
+      border-top: 2px solid var(--line);
+    }
+    h3 {
+      font-size: 1.05rem;
+      margin-top: 28px;
+      color: var(--accent);
+    }
+    p, li {
+      font-size: 1rem;
+      margin: 0 0 12px;
+    }
+    ul {
+      margin: 0 0 18px 20px;
+      padding: 0;
+    }
+    .lead {
+      font-size: 1.08rem;
+      color: var(--muted);
+      max-width: 900px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px 20px;
+      margin: 22px 0;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.04);
+    }
+    .files {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+    .file {
+      background: var(--code);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 0.92rem;
+    }
+    code {
+      background: var(--code);
+      padding: 0.15em 0.35em;
+      border-radius: 6px;
+      font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 24px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+    }
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    th {
+      font-size: 0.92rem;
+      letter-spacing: 0.02em;
+      color: var(--accent);
+      background: #fbf7ef;
+    }
+    tr:last-child td { border-bottom: none; }
+    .math {
+      font-size: 0.93rem;
+      white-space: normal;
+    }
+    .note {
+      color: var(--muted);
+      font-size: 0.96rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Compressible TGV Diagnostics Summary</h1>
+    <p class="lead">
+      This note summarizes the compressible Taylor-Green vortex diagnostics written by
+      <code>writeTGVDiagnostics()</code> in <code>src/M2ulPhyS.cpp</code>. It documents the
+      grouped CSV output and the exact mathematical meaning of each quantity.
+    </p>
+
+    <section class="panel">
+      <h2>Output Files</h2>
+      <p>The diagnostics are split across four CSV files written next to the configured summary filename.</p>
+      <div class="files">
+        <div class="file">tgv_diagnostics.csv</div>
+        <div class="file">tgv_diagnostics_budget.csv</div>
+        <div class="file">tgv_diagnostics_integrals.csv</div>
+        <div class="file">tgv_diagnostics_extrema.csv</div>
+      </div>
+      <p class="note">
+        All values are written in scientific notation with 16 digits after the decimal point.
+      </p>
+    </section>
+
+    <h2>Pointwise Definitions</h2>
+    <p>The diagnostics are evaluated from the primitive and conserved fields reconstructed at quadrature points:</p>
+    <ul>
+      <li><span class="math">\( \rho \)</span>: density</li>
+      <li><span class="math">\( \mathbf{u} = (u, v, w) \)</span>: velocity</li>
+      <li><span class="math">\( \rho E \)</span>: conserved total energy density</li>
+      <li><span class="math">\( T \)</span>: temperature</li>
+      <li><span class="math">\( p = R \rho T \)</span>: pressure</li>
+      <li><span class="math">\( c = \sqrt{\gamma R T} \)</span>: sound speed</li>
+      <li><span class="math">\( M = |\mathbf{u}| / c \)</span>: local Mach number</li>
+      <li><span class="math">\( M_t = \sqrt{\langle M^2 \rangle / 3} \)</span>: turbulent Mach number used for the zero-mean TGV field</li>
+      <li><span class="math">\( \nabla \cdot \mathbf{u} = \partial u/\partial x + \partial v/\partial y + \partial w/\partial z \)</span>: velocity divergence</li>
+      <li><span class="math">\( \boldsymbol{\omega} = \nabla \times \mathbf{u} \)</span>: vorticity</li>
+      <li><span class="math">\( |\boldsymbol{\omega}|^2 = \omega_x^2 + \omega_y^2 + \omega_z^2 \)</span></li>
+      <li><span class="math">\( S_{ij} = \tfrac{1}{2}\left(\partial u_i/\partial x_j + \partial u_j/\partial x_i\right) \)</span>: symmetric strain tensor</li>
+      <li><span class="math">\( S^2 = \sum_{i,j} S_{ij} S_{ij} \)</span></li>
+      <li><span class="math">\( \mu(T) \)</span>: viscosity from the current TGV transport model</li>
+      <li><span class="math">\( \mu(T)/\mu_0 \)</span>: viscosity ratio used in the diagnostics</li>
+      <li><span class="math">\( \rho e = \rho E - \tfrac{1}{2}\rho |\mathbf{u}|^2 \)</span>: internal energy density</li>
+      <li><span class="math">\( \tau:\nabla \mathbf{u} = 2\mu S^2 - \tfrac{2}{3}\mu (\nabla \cdot \mathbf{u})^2 \)</span>: viscous dissipation density used here</li>
+    </ul>
+
+    <h2>Global Scaling</h2>
+    <p>The code uses the physical domain volume <span class="math">\( |\Omega| \)</span> and the TGV reference quantities
+    <span class="math">\( \rho_0 \)</span>, <span class="math">\( U_0 \)</span>, <span class="math">\( L \)</span>,
+    <span class="math">\( \mathrm{Re} \)</span>, and <span class="math">\( \mu_0 \)</span>.</p>
+    <ul>
+      <li>Energy normalization: <span class="math">\( \rho_0 U_0^2 |\Omega| \)</span></li>
+      <li>Budget normalization: <span class="math">\( \rho_0 U_0^3 |\Omega| / L \)</span></li>
+      <li>Dissipation normalization: <span class="math">\( \mathrm{Re}\, U_0^2 |\Omega| / L^2 \)</span></li>
+    </ul>
+
+    <h2>Summary File</h2>
+    <p><code>tgv_diagnostics.csv</code> contains the main normalized diagnostics.</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Column</th>
+          <th>Definition</th>
+          <th>Meaning</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>time</code></td>
+          <td class="math">\( t \)</td>
+          <td>Physical simulation time.</td>
+        </tr>
+        <tr>
+          <td><code>iter</code></td>
+          <td class="math">\( n \)</td>
+          <td>Time-step index.</td>
+        </tr>
+        <tr>
+          <td><code>kinetic_energy</code></td>
+          <td class="math">\( \dfrac{1}{2 \rho_0 U_0^2 |\Omega|}\int_{\Omega} \rho |\mathbf{u}|^2 \, d\Omega \)</td>
+          <td>Normalized volume-averaged kinetic energy.</td>
+        </tr>
+        <tr>
+          <td><code>internal_energy</code></td>
+          <td class="math">\( \dfrac{1}{\rho_0 U_0^2 |\Omega|}\int_{\Omega} \rho e \, d\Omega \)</td>
+          <td>Normalized internal energy.</td>
+        </tr>
+        <tr>
+          <td><code>total_energy</code></td>
+          <td class="math">\( \dfrac{1}{\rho_0 U_0^2 |\Omega|}\int_{\Omega} \rho E \, d\Omega \)</td>
+          <td>Normalized conserved total energy. In this dry-air model, this is internal plus kinetic energy.</td>
+        </tr>
+        <tr>
+          <td><code>turbulent_mach</code></td>
+          <td class="math">\( \sqrt{\dfrac{1}{3 |\Omega|}\int_{\Omega}\left(\dfrac{|\mathbf{u}|}{c}\right)^2 \, d\Omega} \)</td>
+          <td>Rms turbulent Mach number. For the Taylor-Green vortex, the mean velocity is zero, so the resolved velocity is used as the fluctuation velocity.</td>
+        </tr>
+        <tr>
+          <td><code>solenoidal_dissipation</code></td>
+          <td class="math">\( \dfrac{L^2}{\mathrm{Re}\, U_0^2 |\Omega|}\int_{\Omega} \dfrac{\mu}{\mu_0} |\boldsymbol{\omega}|^2 \, d\Omega \)</td>
+          <td>Rotational contribution based on vorticity magnitude.</td>
+        </tr>
+        <tr>
+          <td><code>dilatational_dissipation</code></td>
+          <td class="math">\( \dfrac{4 L^2}{3 \mathrm{Re}\, U_0^2 |\Omega|}\int_{\Omega} \dfrac{\mu}{\mu_0} (\nabla \cdot \mathbf{u})^2 \, d\Omega \)</td>
+          <td>Compressive contribution based on velocity divergence.</td>
+        </tr>
+        <tr>
+          <td><code>enstrophy</code></td>
+          <td class="math">\( \dfrac{1}{2 |\Omega|}\int_{\Omega} |\boldsymbol{\omega}|^2 \, d\Omega \)</td>
+          <td>Volume-averaged enstrophy.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Budget File</h2>
+    <p><code>tgv_diagnostics_budget.csv</code> contains normalized budget terms.</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Column</th>
+          <th>Definition</th>
+          <th>Meaning</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>pressure_work</code></td>
+          <td class="math">\( \dfrac{L}{\rho_0 U_0^3 |\Omega|}\int_{\Omega} p \, \nabla \cdot \mathbf{u} \, d\Omega \)</td>
+          <td>Pressure-dilatation contribution.</td>
+        </tr>
+        <tr>
+          <td><code>viscous_dissipation</code></td>
+          <td class="math">\( \dfrac{L}{\rho_0 U_0^3 |\Omega|}\int_{\Omega} \tau : \nabla \mathbf{u} \, d\Omega \)</td>
+          <td>Normalized viscous dissipation based on the code's stress contraction.</td>
+        </tr>
+        <tr>
+          <td><code>viscous_work</code></td>
+          <td class="math">\( -\,\text{viscous\_dissipation} \)</td>
+          <td>The current implementation reports viscous work as the negative of the dissipation term.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Integrals File</h2>
+    <p><code>tgv_diagnostics_integrals.csv</code> contains the unnormalized integrated quantities.</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Column</th>
+          <th>Definition</th>
+          <th>Meaning</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>ke_integral</code></td>
+          <td class="math">\( \int_{\Omega} \rho |\mathbf{u}|^2 \, d\Omega \)</td>
+          <td>Integral of the kinetic-energy numerator used by <code>kinetic_energy</code>.</td>
+        </tr>
+        <tr>
+          <td><code>internal_energy_integral</code></td>
+          <td class="math">\( \int_{\Omega} \rho e \, d\Omega \)</td>
+          <td>Integral of internal energy before normalization.</td>
+        </tr>
+        <tr>
+          <td><code>total_energy_integral</code></td>
+          <td class="math">\( \int_{\Omega} \rho E \, d\Omega \)</td>
+          <td>Integral of the conserved total energy.</td>
+        </tr>
+        <tr>
+          <td><code>vorticity_integral</code></td>
+          <td class="math">\( \int_{\Omega} |\boldsymbol{\omega}|^2 \, d\Omega \)</td>
+          <td>Unweighted vorticity-squared integral.</td>
+        </tr>
+        <tr>
+          <td><code>weighted_vorticity_integral</code></td>
+          <td class="math">\( \int_{\Omega} \dfrac{\mu}{\mu_0} |\boldsymbol{\omega}|^2 \, d\Omega \)</td>
+          <td>Viscosity-weighted vorticity integral used in the solenoidal dissipation diagnostic.</td>
+        </tr>
+        <tr>
+          <td><code>divergence_integral</code></td>
+          <td class="math">\( \int_{\Omega} (\nabla \cdot \mathbf{u})^2 \, d\Omega \)</td>
+          <td>Unweighted divergence-squared integral.</td>
+        </tr>
+        <tr>
+          <td><code>weighted_divergence_integral</code></td>
+          <td class="math">\( \int_{\Omega} \dfrac{\mu}{\mu_0} (\nabla \cdot \mathbf{u})^2 \, d\Omega \)</td>
+          <td>Viscosity-weighted divergence integral used in the dilatational dissipation diagnostic.</td>
+        </tr>
+        <tr>
+          <td><code>pressure_dilatation_integral</code></td>
+          <td class="math">\( \int_{\Omega} p \, \nabla \cdot \mathbf{u} \, d\Omega \)</td>
+          <td>Unnormalized pressure-dilatation budget term.</td>
+        </tr>
+        <tr>
+          <td><code>viscous_dissipation_integral</code></td>
+          <td class="math">\( \int_{\Omega} \tau : \nabla \mathbf{u} \, d\Omega \)</td>
+          <td>Unnormalized viscous dissipation budget term.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Extrema File</h2>
+    <p><code>tgv_diagnostics_extrema.csv</code> contains extrema and monitoring quantities.</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Column</th>
+          <th>Definition</th>
+          <th>Meaning</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>min_rho</code></td>
+          <td class="math">\( \min_{\mathbf{x} \in \Omega} \rho(\mathbf{x}) \)</td>
+          <td>Minimum density over the domain.</td>
+        </tr>
+        <tr>
+          <td><code>min_pressure</code></td>
+          <td class="math">\( \min_{\mathbf{x} \in \Omega} p(\mathbf{x}) \)</td>
+          <td>Minimum pressure over the domain.</td>
+        </tr>
+        <tr>
+          <td><code>max_mach</code></td>
+          <td class="math">\( \max_{\mathbf{x} \in \Omega} |\mathbf{u}(\mathbf{x})| / c(\mathbf{x}) \)</td>
+          <td>Maximum pointwise Mach number.</td>
+        </tr>
+        <tr>
+          <td><code>max_abs_divu</code></td>
+          <td class="math">\( \max_{\mathbf{x} \in \Omega} |\nabla \cdot \mathbf{u}(\mathbf{x})| \)</td>
+          <td>Maximum absolute divergence over the domain.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Conservation Note</h2>
+    <div class="panel">
+      <p>
+        For the dry-air compressible TGV in a periodic box with no forcing, the global conserved energy is
+        <span class="math">\( \int_{\Omega} \rho E \, d\Omega \)</span>, represented by <code>total_energy_integral</code> and its normalized form
+        <code>total_energy</code>.
+      </p>
+      <p>
+        <code>kinetic_energy</code> and <code>internal_energy</code> are not separately conserved; viscous effects transfer
+        energy between them.
+      </p>
+    </div>
+  </main>
+</body>
+</html>

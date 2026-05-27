@@ -859,15 +859,16 @@ void M2ulPhyS::initVariables() {
       };
 
       write_header_if_new(tgvDiagFile, summaryPath,
-                          {"time", "iter", "kinetic_energy", "solenoidal_dissipation",
-                           "dilatational_dissipation", "enstrophy"});
+                          {"time", "iter", "kinetic_energy", "internal_energy", "total_energy", "turbulent_mach",
+                           "solenoidal_dissipation", "dilatational_dissipation", "enstrophy"});
       write_header_if_new(tgvDiagBudgetFile, budgetPath,
                           {"time", "iter", "pressure_work", "viscous_work", "viscous_dissipation"});
       write_header_if_new(tgvDiagIntegralsFile, integralsPath,
-                          {"time", "iter", "raw_ke_integral", "raw_vorticity_integral",
-                           "raw_weighted_vorticity_integral", "raw_divergence_integral",
-                           "raw_weighted_divergence_integral", "raw_pressure_dilatation_integral",
-                           "raw_viscous_dissipation_integral"});
+                          {"time", "iter", "ke_integral", "internal_energy_integral",
+                           "total_energy_integral", "vorticity_integral",
+                           "weighted_vorticity_integral", "divergence_integral",
+                           "weighted_divergence_integral", "pressure_dilatation_integral",
+                           "viscous_dissipation_integral"});
       write_header_if_new(tgvDiagExtremaFile, extremaPath,
                           {"time", "iter", "min_rho", "min_pressure", "max_mach", "max_abs_divu"});
     }
@@ -2582,6 +2583,7 @@ void M2ulPhyS::computeTGVDiagnostics(TGVDiagnosticState &diag) {
   rhsOperator->updateGradients(*U, false);
 
   const double *dataUp = Up->HostRead();
+  const double *dataU = U->HostRead();
   const double *dataGradUp = gradUp->HostRead();
   const int dof = vfes->GetNDofs();
 
@@ -2595,6 +2597,8 @@ void M2ulPhyS::computeTGVDiagnostics(TGVDiagnosticState &diag) {
   const double volume = (xmax - xmin) * (ymax - ymin) * (zmax - zmin);
 
   double local_ke_int = 0.0;
+  double local_internal_energy_int = 0.0;
+  double local_total_energy_int = 0.0;
   double local_omega2_int = 0.0;
   double local_sol_int = 0.0;
   double local_div2_int = 0.0;
@@ -2605,6 +2609,7 @@ void M2ulPhyS::computeTGVDiagnostics(TGVDiagnosticState &diag) {
   double local_density_l1_int = 0.0;
   double local_velocity_magnitude_l1_int = 0.0;
   double local_sound_speed_l1_int = 0.0;
+  double local_mach2_int = 0.0;
   double local_min_rho = std::numeric_limits<double>::max();
   double local_min_p = std::numeric_limits<double>::max();
   double local_max_mach = 0.0;
@@ -2628,6 +2633,7 @@ void M2ulPhyS::computeTGVDiagnostics(TGVDiagnosticState &diag) {
       const double wq = ip.weight * tr->Weight();
 
       double rho = 0.0;
+      double rhoE = 0.0;
       double vel[3] = {0.0, 0.0, 0.0};
       double temp = 0.0;
       double grad_vel[3][3] = {{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}};
@@ -2637,6 +2643,7 @@ void M2ulPhyS::computeTGVDiagnostics(TGVDiagnosticState &diag) {
         if (idx < 0) idx = -1 - idx;
         const double sh = shape[n];
         rho += sh * dataUp[idx + 0 * dof];
+        rhoE += sh * dataU[idx + (1 + nvel) * dof];
         for (int a = 0; a < 3; a++) vel[a] += sh * dataUp[idx + (1 + a) * dof];
         temp += sh * dataUp[idx + (1 + nvel) * dof];
 
@@ -2670,8 +2677,11 @@ void M2ulPhyS::computeTGVDiagnostics(TGVDiagnosticState &diag) {
       const double mu = tgvSutherlandViscosity(temp);
       const double mu_ratio = mu / mu0;
       const double visc_diss = 2.0 * mu * S2 - (2.0 / 3.0) * mu * divu * divu;
+      const double internal_energy_density = rhoE - 0.5 * rho * u2;
 
       local_ke_int += wq * rho * u2;
+      local_internal_energy_int += wq * internal_energy_density;
+      local_total_energy_int += wq * rhoE;
       local_omega2_int += wq * vort2;
       local_sol_int += wq * mu_ratio * vort2;
       local_div2_int += wq * divu * divu;
@@ -2682,6 +2692,7 @@ void M2ulPhyS::computeTGVDiagnostics(TGVDiagnosticState &diag) {
       local_density_l1_int += wq * std::abs(rho);
       local_velocity_magnitude_l1_int += wq * std::sqrt(u2);
       local_sound_speed_l1_int += wq * std::abs(c);
+      local_mach2_int += wq * mach * mach;
       local_min_rho = std::min(local_min_rho, rho);
       local_min_p = std::min(local_min_p, pressure);
       local_max_mach = std::max(local_max_mach, mach);
@@ -2690,6 +2701,8 @@ void M2ulPhyS::computeTGVDiagnostics(TGVDiagnosticState &diag) {
   }
 
   double ke_int = 0.0;
+  double internal_energy_int = 0.0;
+  double total_energy_int = 0.0;
   double omega2_int = 0.0;
   double sol_int = 0.0;
   double div2_int = 0.0;
@@ -2700,12 +2713,15 @@ void M2ulPhyS::computeTGVDiagnostics(TGVDiagnosticState &diag) {
   double density_l1_int = 0.0;
   double velocity_magnitude_l1_int = 0.0;
   double sound_speed_l1_int = 0.0;
+  double mach2_int = 0.0;
   double min_rho = 0.0;
   double min_p = 0.0;
   double max_mach = 0.0;
   double max_abs_divu = 0.0;
 
   MPI_Allreduce(&local_ke_int, &ke_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
+  MPI_Allreduce(&local_internal_energy_int, &internal_energy_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
+  MPI_Allreduce(&local_total_energy_int, &total_energy_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
   MPI_Allreduce(&local_omega2_int, &omega2_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
   MPI_Allreduce(&local_sol_int, &sol_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
   MPI_Allreduce(&local_div2_int, &div2_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
@@ -2718,12 +2734,16 @@ void M2ulPhyS::computeTGVDiagnostics(TGVDiagnosticState &diag) {
   MPI_Allreduce(&local_velocity_magnitude_l1_int, &velocity_magnitude_l1_int, 1, MPI_DOUBLE, MPI_SUM,
                 mesh->GetComm());
   MPI_Allreduce(&local_sound_speed_l1_int, &sound_speed_l1_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
+  MPI_Allreduce(&local_mach2_int, &mach2_int, 1, MPI_DOUBLE, MPI_SUM, mesh->GetComm());
   MPI_Allreduce(&local_min_rho, &min_rho, 1, MPI_DOUBLE, MPI_MIN, mesh->GetComm());
   MPI_Allreduce(&local_min_p, &min_p, 1, MPI_DOUBLE, MPI_MIN, mesh->GetComm());
   MPI_Allreduce(&local_max_mach, &max_mach, 1, MPI_DOUBLE, MPI_MAX, mesh->GetComm());
   MPI_Allreduce(&local_max_abs_divu, &max_abs_divu, 1, MPI_DOUBLE, MPI_MAX, mesh->GetComm());
 
   diag.kinetic_energy = ke_int / (2.0 * rho0 * U0 * U0 * volume);
+  diag.internal_energy = internal_energy_int / (rho0 * U0 * U0 * volume);
+  diag.total_energy = total_energy_int / (rho0 * U0 * U0 * volume);
+  diag.turbulent_mach = std::sqrt(mach2_int / (3.0 * volume));
   diag.solenoidal_dissipation = L * L * sol_int / (Re * U0 * U0 * volume);
   diag.dilatational_dissipation = 4.0 * L * L * dil_int / (3.0 * Re * U0 * U0 * volume);
   diag.enstrophy = 0.5 * omega2_int / volume;
@@ -2732,13 +2752,15 @@ void M2ulPhyS::computeTGVDiagnostics(TGVDiagnosticState &diag) {
   diag.pressure_work = budget_scale * pressure_dilatation_int;
   diag.viscous_dissipation = budget_scale * visc_diss_int;
   diag.viscous_work = -diag.viscous_dissipation;
-  diag.raw_ke_integral = ke_int;
-  diag.raw_vorticity_integral = omega2_int;
-  diag.raw_weighted_vorticity_integral = sol_int;
-  diag.raw_divergence_integral = div2_int;
-  diag.raw_weighted_divergence_integral = dil_int;
-  diag.raw_pressure_dilatation_integral = pressure_dilatation_int;
-  diag.raw_viscous_dissipation_integral = visc_diss_int;
+  diag.ke_integral = ke_int;
+  diag.internal_energy_integral = internal_energy_int;
+  diag.total_energy_integral = total_energy_int;
+  diag.vorticity_integral = omega2_int;
+  diag.weighted_vorticity_integral = sol_int;
+  diag.divergence_integral = div2_int;
+  diag.weighted_divergence_integral = dil_int;
+  diag.pressure_dilatation_integral = pressure_dilatation_int;
+  diag.viscous_dissipation_integral = visc_diss_int;
   diag.min_rho = min_rho;
   diag.min_pressure = min_p;
   diag.max_mach = max_mach;
@@ -2813,6 +2835,9 @@ void M2ulPhyS::writeTGVDiagnostics(bool force_write) {
       constexpr int value_width = 25;
       write_csv_row_prefix(tgvDiagFile);
       tgvDiagFile << "," << std::setw(value_width) << latestTGVDiagnostics_.kinetic_energy << ","
+                  << std::setw(value_width) << latestTGVDiagnostics_.internal_energy << ","
+                  << std::setw(value_width) << latestTGVDiagnostics_.total_energy << ","
+                  << std::setw(value_width) << latestTGVDiagnostics_.turbulent_mach << ","
                   << std::setw(value_width) << latestTGVDiagnostics_.solenoidal_dissipation << ","
                   << std::setw(value_width) << latestTGVDiagnostics_.dilatational_dissipation << ","
                   << std::setw(value_width) << latestTGVDiagnostics_.enstrophy << std::endl;
@@ -2827,13 +2852,15 @@ void M2ulPhyS::writeTGVDiagnostics(bool force_write) {
     if (tgvDiagIntegralsFile.is_open()) {
       constexpr int value_width = 25;
       write_csv_row_prefix(tgvDiagIntegralsFile);
-      tgvDiagIntegralsFile << "," << std::setw(value_width) << latestTGVDiagnostics_.raw_ke_integral << ","
-                           << std::setw(value_width) << latestTGVDiagnostics_.raw_vorticity_integral << ","
-                           << std::setw(value_width) << latestTGVDiagnostics_.raw_weighted_vorticity_integral << ","
-                           << std::setw(value_width) << latestTGVDiagnostics_.raw_divergence_integral << ","
-                           << std::setw(value_width) << latestTGVDiagnostics_.raw_weighted_divergence_integral << ","
-                           << std::setw(value_width) << latestTGVDiagnostics_.raw_pressure_dilatation_integral << ","
-                           << std::setw(value_width) << latestTGVDiagnostics_.raw_viscous_dissipation_integral
+      tgvDiagIntegralsFile << "," << std::setw(value_width) << latestTGVDiagnostics_.ke_integral << ","
+                           << std::setw(value_width) << latestTGVDiagnostics_.internal_energy_integral << ","
+                           << std::setw(value_width) << latestTGVDiagnostics_.total_energy_integral << ","
+                           << std::setw(value_width) << latestTGVDiagnostics_.vorticity_integral << ","
+                           << std::setw(value_width) << latestTGVDiagnostics_.weighted_vorticity_integral << ","
+                           << std::setw(value_width) << latestTGVDiagnostics_.divergence_integral << ","
+                           << std::setw(value_width) << latestTGVDiagnostics_.weighted_divergence_integral << ","
+                           << std::setw(value_width) << latestTGVDiagnostics_.pressure_dilatation_integral << ","
+                           << std::setw(value_width) << latestTGVDiagnostics_.viscous_dissipation_integral
                            << std::endl;
     }
     if (tgvDiagExtremaFile.is_open()) {

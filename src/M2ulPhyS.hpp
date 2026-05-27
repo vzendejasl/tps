@@ -112,19 +112,24 @@ class M2ulPhyS : public TPS::PlasmaSolver {
 
   struct TGVDiagnosticState {
     double kinetic_energy = 0.0;
+    double internal_energy = 0.0;
+    double total_energy = 0.0;
+    double turbulent_mach = 0.0;
     double solenoidal_dissipation = 0.0;
     double dilatational_dissipation = 0.0;
     double enstrophy = 0.0;
     double pressure_work = 0.0;
     double viscous_work = 0.0;
     double viscous_dissipation = 0.0;
-    double raw_ke_integral = 0.0;
-    double raw_vorticity_integral = 0.0;
-    double raw_weighted_vorticity_integral = 0.0;
-    double raw_divergence_integral = 0.0;
-    double raw_weighted_divergence_integral = 0.0;
-    double raw_pressure_dilatation_integral = 0.0;
-    double raw_viscous_dissipation_integral = 0.0;
+    double ke_integral = 0.0;
+    double internal_energy_integral = 0.0;
+    double total_energy_integral = 0.0;
+    double vorticity_integral = 0.0;
+    double weighted_vorticity_integral = 0.0;
+    double divergence_integral = 0.0;
+    double weighted_divergence_integral = 0.0;
+    double pressure_dilatation_integral = 0.0;
+    double viscous_dissipation_integral = 0.0;
     double min_rho = 0.0;
     double min_pressure = 0.0;
     double max_mach = 0.0;

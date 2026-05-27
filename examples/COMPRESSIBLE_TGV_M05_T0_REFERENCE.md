@@ -57,13 +57,13 @@ These are the exact values of the quantities written by
 | `pressure_work` | `0` |
 | `viscous_work` | `-3/(4*Re) = -1.5000000000000000e-03` |
 | `viscous_dissipation` | `3/(4*Re) = 1.5000000000000000e-03` |
-| `raw_ke_integral` | `2.0000000000000000e+00` |
-| `raw_vorticity_integral` | `6*pi^2 = 5.9217626406536141e+01` |
-| `raw_weighted_vorticity_integral` | `6*pi^2 = 5.9217626406536141e+01` |
-| `raw_divergence_integral` | `0` |
-| `raw_weighted_divergence_integral` | `0` |
-| `raw_pressure_dilatation_integral` | `0` |
-| `raw_viscous_dissipation_integral` | `6*pi/Re = 3.7699111843077518e-02` |
+| `ke_integral` | `2.0000000000000000e+00` |
+| `vorticity_integral` | `6*pi^2 = 5.9217626406536141e+01` |
+| `weighted_vorticity_integral` | `6*pi^2 = 5.9217626406536141e+01` |
+| `divergence_integral` | `0` |
+| `weighted_divergence_integral` | `0` |
+| `pressure_dilatation_integral` | `0` |
+| `viscous_dissipation_integral` | `6*pi/Re = 3.7699111843077518e-02` |
 | `min_pressure` | `p0 - 3/8 = 2.4821428571428572e+00` |
 | `min_rho` | `(p0 - 3/8)/T0 = 8.6875000000000002e-01` |
 | `max_mach` | `5.0000000000000000e-01` |
