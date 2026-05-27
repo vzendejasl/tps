@@ -60,7 +60,7 @@ int main (int argc, char *argv[])
   RHSoperator *rhsOperator = srcField->getRHSoperator();
   ParGridFunction *rhs = new ParGridFunction(*src_state);
 
-  ParaViewDataCollection *paraviewColl = srcField->GetParaviewColl();
+  DataCollection *paraviewColl = srcField->GetParaviewColl();
 
   std::vector<ParGridFunction *> visualizationVariables(4 * numVariables);
   for (int func = 0; func < 3; func++) {

@@ -49,6 +49,8 @@ def parse_includes(incs,match):
     myincs = myincs.lstrip("=")    # strip equal sign
     myincs = myincs.lstrip()       # strip spaces after equal sign
 
+    myincs = myincs.replace("$(MFEM_DIR)", mfem_dir)
+
     incs = []
     for item in myincs.split():
         # check for seach paths
@@ -84,6 +86,8 @@ def parse_libs(libs,match):
     mylibs = mylibs.lstrip()       # strip spaces after variable name
     mylibs = mylibs.lstrip("=")    # strip equal sign
     mylibs = mylibs.lstrip()       # strip spaces after equal sign
+
+    mylibs = mylibs.replace("$(MFEM_DIR)", mfem_dir)
 
     libs = []
     for item in mylibs.split():

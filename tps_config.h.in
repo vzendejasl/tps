@@ -36,7 +36,7 @@
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
 
-/* Define to 1 if you have the 'cuda' library (-lcuda). */
+/* Define to 1 if you have the `cuda' library (-lcuda). */
 #undef HAVE_LIBCUDA
 
 /* Define if MASA is available */
@@ -114,7 +114,7 @@
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION
 
-/* Define to 1 if all of the C89 standard headers exist (not just the ones
+/* Define to 1 if all of the C90 standard headers exist (not just the ones
    required in a freestanding environment). This macro is provided for
    backward compatibility; new code need not use it. */
 #undef STDC_HEADERS
