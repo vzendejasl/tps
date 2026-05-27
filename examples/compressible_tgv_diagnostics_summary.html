@@ -152,6 +152,44 @@
       </p>
     </section>
 
+    <h2>Time-Based Stop and Output Control</h2>
+    <div class="panel">
+      <p>
+        The compressible TGV path now supports optional time-based stopping and optional time-based restart and
+        visualization scheduling.
+      </p>
+      <ul>
+        <li><code>time/stopMode = cycles | time | either</code></li>
+        <li><code>time/finalTime</code></li>
+        <li><code>io/outputMode = cycles | time | either</code></li>
+        <li><code>io/outputIntervalTime</code></li>
+      </ul>
+      <p>
+        When <code>stopMode = time</code> or <code>either</code>, the solver clips the final step so that
+        <span class="math">\( t = t_{\mathrm{final}} \)</span> is reached exactly.
+      </p>
+      <p>
+        When <code>outputMode = time</code> or <code>either</code>, restart and visualization writes are triggered when the
+        running time crosses the next scheduled output time. The output events are therefore time-based, but the VisIt
+        datasets are still labeled by the current cycle number through the solver iteration count.
+      </p>
+      <p>
+        The visualization history is retained as multiple <code>visit_*.mfem_root</code> outputs, while the restart file
+        is currently a rolling checkpoint named <code>restart_&lt;outdirBase&gt;.sol*.h5</code>. Each scheduled restart write
+        overwrites the previous restart file.
+      </p>
+      <p>
+        Example: the input deck
+        <code>examples/input.compressible_tgv_re400_m125_32cubed_time_output.ini</code>
+        uses
+        <span class="math">\( t_{\mathrm{final}} = 3.1831 \)</span> and
+        <span class="math">\( \Delta t_{\mathrm{out}} = 3.1831 / 26 \)</span>
+        to produce 25 interior output events, plus the initial write at
+        <span class="math">\( t = 0 \)</span>, plus the final write at
+        <span class="math">\( t = 3.1831 \)</span>.
+      </p>
+    </div>
+
     <h2>Pointwise Definitions</h2>
     <p>The diagnostics are evaluated from the primitive and conserved fields reconstructed at quadrature points:</p>
     <ul>

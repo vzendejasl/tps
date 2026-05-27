@@ -48,6 +48,8 @@
 using namespace mfem;
 using namespace std;
 
+enum class StopControlMode { CYCLES, TIME, EITHER };
+
 // Class to manage the run options as
 // specified in the input file
 // Lines begining with # are ignored
@@ -101,6 +103,8 @@ class RunConfiguration {
   // variable/constant time-step
   bool constantTimeStep;
   double dt_fixed;
+  StopControlMode stop_mode_;
+  double finalTime;
   double dt_initial;
   double dt_factor;
   int solver_iter;
@@ -359,8 +363,12 @@ class RunConfiguration {
   double GetCFLNumber() { return cflNum; }
   bool isTimeStepConstant() const { return constantTimeStep; }
   double GetFixedDT() const { return dt_fixed; }
+  StopControlMode GetStopControlMode() const { return stop_mode_; }
+  double GetFinalTime() const { return finalTime; }
   int GetNumIters() { return numIters; }
   int GetNumItersOutput() { return itersOut; }
+  OutputControlMode GetOutputControlMode() const { return io_opts_.output_mode_; }
+  double GetOutputIntervalTime() const { return io_opts_.output_interval_time_; }
   bool RoeRiemannSolverTPS() const { return useRoe; }
 
   int GetMeanStartIter() { return avg_opts_.step_start_mean_; }

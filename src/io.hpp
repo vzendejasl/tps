@@ -53,6 +53,8 @@ namespace TPS {
 class Tps;
 }
 
+enum class OutputControlMode { CYCLES, TIME, EITHER };
+
 /**
  * @brief A place to hold options from the "io" section of a tps input deck
  */
@@ -61,6 +63,8 @@ class IOOptions {
   IOOptions();
 
   std::string output_dir_;
+  OutputControlMode output_mode_ = OutputControlMode::CYCLES;
+  double output_interval_time_ = -1.0;
   bool enable_restart_ = false;
   bool enable_restart_from_lte_ = false;
 

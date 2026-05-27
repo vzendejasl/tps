@@ -306,6 +306,7 @@ class M2ulPhyS : public TPS::PlasmaSolver {
   // time of end of simulation
   double t_final;
   int MaxIters;
+  double next_output_time_;
 
   // Courant-Friedrich-Levy condition
   double CFL;
@@ -378,6 +379,17 @@ class M2ulPhyS : public TPS::PlasmaSolver {
   void initVariables();
   void initSolutionAndVisualizationVectors();
   void initialTimeStep();
+  bool useTimeBasedStop() const;
+  bool useCycleBasedStop() const;
+  bool useTimeBasedOutput() const;
+  bool useCycleBasedOutput() const;
+  bool hasReachedFinalTime() const;
+  bool shouldContinueSolving() const;
+  void clipTimeStepToFinalTime();
+  void initializeOutputSchedule();
+  bool isTimeBasedOutputDue() const;
+  void advanceOutputSchedule();
+  void writeScheduledOutput();
 
   static void InitialConditionEulerVortex(const Vector &x, Vector &y);
   static void testInitialCondition(const Vector &x, Vector &y);

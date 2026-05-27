@@ -25,7 +25,7 @@ TEST_LOG_DRIVER = env AM_TAP_AWK='$(AWK)' $(SHELL) $(top_srcdir)/test/tap-driver
 TEST_EXTENSIONS = .test
 TEST_LOG_COMPILER = ./bats
 
-EXTRA_DIST  = tap-driver.sh test_tps_splitcomm.py soln_differ check_tgv_diagnostics.py inputs meshes lte-data rad-data \
+EXTRA_DIST  = tap-driver.sh test_tps_splitcomm.py soln_differ check_tgv_diagnostics.py check_time_controls.py inputs meshes lte-data rad-data \
 	          ref_solns/*.h5 ref_solns/collisions/*.h5 ref_solns/transport/*.h5 \
 			  ref_solns/reaction/*.h5 ref_solns/noSGM1K/*.h5 ref_solns/smag1K_1/*.h5 \
 			  ref_solns/sigma1K_1/*.h5 ref_solns/plate150K/*.h5 ref_solns/plate150K_1step/*.h5 \
@@ -44,7 +44,7 @@ EXTRA_DIST  = tap-driver.sh test_tps_splitcomm.py soln_differ check_tgv_diagnost
 			  ref_solns/pipe.zeta-f/*.h5 \
 		      vpath.sh die.sh count_gpus.sh sniff_mpirun.sh \
 		      cyl3d.gpu.test cyl3d.mflow.gpu.test wedge.gpu.test \
-	          averaging.gpu.test cyl3d.test cyl3d.gpu.python.test cyl3d.mflow.test cyl3d.dtconst.test compressible_tgv_diag.test \
+	          averaging.gpu.test cyl3d.test cyl3d.gpu.python.test cyl3d.mflow.test cyl3d.dtconst.test compressible_tgv_diag.test compressible_tgv_time_control.test \
 		      die.test averaging.test wedge.test cyl3d.interp.test qms.rings.test qms.axisym.test \
 		      sponge_zone.test annulus.test pipe.test valgrind.test valgrind.suppressions \
 		      mms.euler.test reaction.test perfect_gas.test collision_integrals.test \
@@ -94,6 +94,7 @@ TESTS += cyl3d.test \
 	 cyl3d.mflow.test \
 	 cyl3d.dtconst.test \
 	 compressible_tgv_diag.test \
+	 compressible_tgv_time_control.test \
 	 averaging.test \
 	 wedge.test \
 	 qms.rings.test \

@@ -51,6 +51,8 @@ RunConfiguration::RunConfiguration() {
   cflNum = 0.12;
   constantTimeStep = false;
   dt_fixed = -1.0;
+  stop_mode_ = StopControlMode::CYCLES;
+  finalTime = -1.0;
   numIters = 10;
   useRoe = false;
   restart_hdf5_conversion = false;

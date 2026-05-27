@@ -417,6 +417,21 @@ void IOOptions::read(TPS::Tps *tps, std::string prefix) {
     basename = "io";
   }
   tps->getInput((basename + "/outdirBase").c_str(), output_dir_, std::string("output-default"));
+  {
+    std::string output_mode("cycles");
+    tps->getInput((basename + "/outputMode").c_str(), output_mode, std::string("cycles"));
+    if (output_mode == "cycles") {
+      output_mode_ = OutputControlMode::CYCLES;
+    } else if (output_mode == "time") {
+      output_mode_ = OutputControlMode::TIME;
+    } else if (output_mode == "either") {
+      output_mode_ = OutputControlMode::EITHER;
+    } else {
+      grvy_printf(GRVY_ERROR, "\nUnknown output mode -> %s\n", output_mode.c_str());
+      exit(1);
+    }
+  }
+  tps->getInput((basename + "/outputIntervalTime").c_str(), output_interval_time_, -1.0);
   tps->getInput((basename + "/enableRestart").c_str(), enable_restart_, false);
   tps->getInput((basename + "/restartFromLTE").c_str(), enable_restart_from_lte_, false);
   tps->getInput((basename + "/exitCheckFreq").c_str(), exit_check_frequency_, 500);

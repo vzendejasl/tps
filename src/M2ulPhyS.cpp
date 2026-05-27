@@ -2066,6 +2066,8 @@ void M2ulPhyS::projectInitialSolution() {
     paraviewColl->Save();
     restart_files_hdf5("write");
   }
+
+  initializeOutputSchedule();
 }
 
 void M2ulPhyS::solveBegin() {
@@ -2081,6 +2083,7 @@ void M2ulPhyS::solveBegin() {
 }
 
 void M2ulPhyS::solveStep() {
+  clipTimeStepToFinalTime();
   timeIntegrator->Step(*U, time, dt);
 
   Check_NAN();
@@ -2102,7 +2105,10 @@ void M2ulPhyS::solveStep() {
   }
 
   const int vis_steps = config.GetNumItersOutput();
-  if (iter % vis_steps == 0) {
+  const bool cycle_output_due = useCycleBasedOutput() && ((iter % vis_steps) == 0);
+  const bool time_output_due = isTimeBasedOutputDue();
+  const bool stop_reached = !shouldContinueSolving();
+  if ((cycle_output_due || time_output_due) && !stop_reached) {
 #ifdef HAVE_MASA
     if (config.use_mms_) {
       if (config.mmsSaveDetails_) {
@@ -2121,31 +2127,7 @@ void M2ulPhyS::solveStep() {
     }
 #endif
 
-    if (iter != MaxIters) {
-      // auto hUp = Up->HostRead();
-      Up->HostRead();
-      mixture->UpdatePressureGridFunction(press, Up);
-      updateDerivedVisualizationFields();
-
-      restart_files_hdf5("write");
-
-      paraviewColl->SetCycle(iter);
-      paraviewColl->SetTime(time);
-      paraviewColl->Save();
-      // auto dUp = Up->ReadWrite();  // sets memory to GPU
-      Up->ReadWrite();  // sets memory to GPU
-
-      average->writeViz(iter, time, config.isMeanHistEnabled());
-
-      if (config.useCompressibleTGV && rank0_) {
-        std::ios::fmtflags old_flags = std::cout.flags();
-        std::streamsize old_precision = std::cout.precision();
-        std::cout << "checkpoint: cycle " << iter << ", time " << std::scientific << std::setprecision(6) << time
-                  << "s" << std::endl;
-        std::cout.flags(old_flags);
-        std::cout.precision(old_precision);
-      }
-    }
+    writeScheduledOutput();
 
     // make a separate routine! plane interp and dump here
     if (config.planeDump.isEnabled == true) {
@@ -2249,8 +2231,12 @@ void M2ulPhyS::solve() {
   bool readyForRestart = false;
 #endif
 
+  if (!shouldContinueSolving()) {
+    MaxIters = iter;
+  }
+
   // Integrate in time.
-  while (iter < MaxIters) {
+  while (shouldContinueSolving()) {
     grvy_timer_begin(__func__);
 
     // periodically report on time/iteratino
@@ -2266,6 +2252,12 @@ void M2ulPhyS::solve() {
 
     // Do the step
     this->solveStep();
+
+    if (!shouldContinueSolving()) {
+      MaxIters = iter;
+      grvy_timer_end(__func__);
+      break;
+    }
 
 #ifdef HAVE_SLURM
     // check if near end of a run and ready to submit restart
@@ -3155,6 +3147,113 @@ void M2ulPhyS::initialTimeStep() {
   }
 }
 
+bool M2ulPhyS::useTimeBasedStop() const {
+  return (config.GetStopControlMode() == StopControlMode::TIME) ||
+         (config.GetStopControlMode() == StopControlMode::EITHER);
+}
+
+bool M2ulPhyS::useCycleBasedStop() const {
+  return (config.GetStopControlMode() == StopControlMode::CYCLES) ||
+         (config.GetStopControlMode() == StopControlMode::EITHER);
+}
+
+bool M2ulPhyS::useTimeBasedOutput() const {
+  return (config.GetOutputControlMode() == OutputControlMode::TIME) ||
+         (config.GetOutputControlMode() == OutputControlMode::EITHER);
+}
+
+bool M2ulPhyS::useCycleBasedOutput() const {
+  return (config.GetOutputControlMode() == OutputControlMode::CYCLES) ||
+         (config.GetOutputControlMode() == OutputControlMode::EITHER);
+}
+
+bool M2ulPhyS::hasReachedFinalTime() const {
+  if (!useTimeBasedStop()) return false;
+  const double final_time = config.GetFinalTime();
+  const double tol = 1.0e-12 * std::max(1.0, std::abs(final_time));
+  return time >= (final_time - tol);
+}
+
+bool M2ulPhyS::shouldContinueSolving() const {
+  const bool cycle_ok = !useCycleBasedStop() || (iter < MaxIters);
+  const bool time_ok = !useTimeBasedStop() || !hasReachedFinalTime();
+  return cycle_ok && time_ok;
+}
+
+void M2ulPhyS::clipTimeStepToFinalTime() {
+  if (!useTimeBasedStop()) return;
+
+  const double remaining = config.GetFinalTime() - time;
+  const double tol = 1.0e-12 * std::max(1.0, std::abs(config.GetFinalTime()));
+  if (remaining <= tol) {
+    dt = 0.0;
+    return;
+  }
+
+  if (dt > remaining) {
+    dt = remaining;
+  }
+}
+
+void M2ulPhyS::initializeOutputSchedule() {
+  if (!useTimeBasedOutput()) {
+    next_output_time_ = -1.0;
+    return;
+  }
+
+  const double interval = config.GetOutputIntervalTime();
+  const double tol = 1.0e-12 * std::max(1.0, std::abs(interval));
+  if (time <= tol) {
+    next_output_time_ = interval;
+    return;
+  }
+
+  const double completed_intervals = std::floor((time + tol) / interval);
+  next_output_time_ = (completed_intervals + 1.0) * interval;
+}
+
+bool M2ulPhyS::isTimeBasedOutputDue() const {
+  if (!useTimeBasedOutput() || (next_output_time_ <= 0.0)) return false;
+  const double tol = 1.0e-12 * std::max(1.0, std::abs(next_output_time_));
+  return time >= (next_output_time_ - tol);
+}
+
+void M2ulPhyS::advanceOutputSchedule() {
+  if (!useTimeBasedOutput() || (next_output_time_ <= 0.0)) return;
+
+  const double interval = config.GetOutputIntervalTime();
+  const double tol = 1.0e-12 * std::max(1.0, std::abs(interval));
+  while (time >= (next_output_time_ - tol)) {
+    next_output_time_ += interval;
+  }
+}
+
+void M2ulPhyS::writeScheduledOutput() {
+  Up->HostRead();
+  mixture->UpdatePressureGridFunction(press, Up);
+  updateDerivedVisualizationFields();
+
+  restart_files_hdf5("write");
+
+  paraviewColl->SetCycle(iter);
+  paraviewColl->SetTime(time);
+  paraviewColl->Save();
+  Up->ReadWrite();
+
+  average->writeViz(iter, time, config.isMeanHistEnabled());
+
+  if (config.useCompressibleTGV && rank0_) {
+    std::ios::fmtflags old_flags = std::cout.flags();
+    std::streamsize old_precision = std::cout.precision();
+    std::cout << "checkpoint: cycle " << iter << ", time " << std::scientific << std::setprecision(6) << time
+              << "s" << std::endl;
+    std::cout.flags(old_flags);
+    std::cout.precision(old_precision);
+  }
+
+  advanceOutputSchedule();
+}
+
 void M2ulPhyS::parseSolverOptions() { return; }
 
 // koomie TODO: add parsing of all previously possible runtime inputs.
@@ -3315,6 +3414,21 @@ void M2ulPhyS::parseTimeIntegrationOptions() {
   tpsP->getInput("time/integrator", type, std::string("rk4"));
   tpsP->getInput("time/enableConstantTimestep", config.constantTimeStep, false);
   tpsP->getInput("time/dt_fixed", config.dt_fixed, -1.);
+  {
+    std::string stop_mode("cycles");
+    tpsP->getInput("time/stopMode", stop_mode, std::string("cycles"));
+    if (stop_mode == "cycles") {
+      config.stop_mode_ = StopControlMode::CYCLES;
+    } else if (stop_mode == "time") {
+      config.stop_mode_ = StopControlMode::TIME;
+    } else if (stop_mode == "either") {
+      config.stop_mode_ = StopControlMode::EITHER;
+    } else {
+      grvy_printf(GRVY_ERROR, "Unknown stop mode > %s\n", stop_mode.c_str());
+      exit(ERROR);
+    }
+  }
+  tpsP->getInput("time/finalTime", config.finalTime, -1.0);
   if (integrators.count(type) == 1) {
     config.timeIntegratorType = integrators[type];
   } else {
@@ -4651,6 +4765,24 @@ void M2ulPhyS::checkSolverOptions() const {
       std::cerr << "[WARNING]: Setting dt_fixed overrides enableConstantTimestep." << std::endl;
       std::cerr << std::endl;
     }
+  }
+
+  if ((config.GetStopControlMode() != StopControlMode::CYCLES) && (config.GetFinalTime() <= 0.0)) {
+    if (rank0_) {
+      std::cerr << "[ERROR]: time/finalTime must be positive when time/stopMode is 'time' or 'either'."
+                << std::endl;
+      std::cerr << std::endl;
+    }
+    exit(ERROR);
+  }
+
+  if ((config.GetOutputControlMode() != OutputControlMode::CYCLES) && (config.GetOutputIntervalTime() <= 0.0)) {
+    if (rank0_) {
+      std::cerr << "[ERROR]: io/outputIntervalTime must be positive when io/outputMode is 'time' or 'either'."
+                << std::endl;
+      std::cerr << std::endl;
+    }
+    exit(ERROR);
   }
 
   return;

@@ -1,0 +1,143 @@
+#!./bats
+# -*- mode: sh -*-
+
+TEST="compressible_tgv_time_control"
+RUNFILE="inputs/input.compressible_tgv_m05.ini"
+EXE="../src/tps"
+CHECKER="../../test/check_time_controls.py"
+
+setup() {
+    MPIRUN=`./sniff_mpirun.sh`
+}
+
+cleanup_case() {
+    local outdir="$1"
+    rm -rf "$outdir"
+    rm -f "restart_${outdir}.sol"*.h5
+    rm -f history.hist
+}
+
+make_runfile() {
+    local runfile="$1"
+    local outdir="$2"
+    local max_iters="$3"
+    local stop_mode="$4"
+    local final_time="$5"
+    local constant_dt="$6"
+    local dt_fixed="$7"
+    local cfl="$8"
+    local output_mode="$9"
+    local output_interval="${10}"
+    local enable_restart="${11}"
+
+    python3 - "$RUNFILE" "$runfile" "$outdir" "$max_iters" "$stop_mode" "$final_time" \
+        "$constant_dt" "$dt_fixed" "$cfl" "$output_mode" "$output_interval" "$enable_restart" <<'PY'
+from pathlib import Path
+import sys
+
+src = Path(sys.argv[1]).read_text()
+runfile = Path(sys.argv[2])
+outdir = sys.argv[3]
+max_iters = sys.argv[4]
+stop_mode = sys.argv[5]
+final_time = sys.argv[6]
+constant_dt = sys.argv[7]
+dt_fixed = sys.argv[8]
+cfl = sys.argv[9]
+output_mode = sys.argv[10]
+output_interval = sys.argv[11]
+enable_restart = sys.argv[12]
+
+time_block = f"""[time]
+cfl = {cfl}
+integrator = rk4
+enableConstantTimestep = {constant_dt}
+dt_fixed = {dt_fixed}
+stopMode = {stop_mode}
+finalTime = {final_time}"""
+
+io_block = f"""[io]
+outdirBase = {outdir}
+outputMode = {output_mode}
+outputIntervalTime = {output_interval}
+enableRestart = {enable_restart}
+restartMode = standard"""
+
+src = src.replace("maxIters = 1", f"maxIters = {max_iters}")
+src = src.replace(
+    """[time]
+cfl = 0.05
+integrator = rk4
+enableConstantTimestep = True
+dt_fixed = 1.0e-4""",
+    time_block,
+)
+src = src.replace(
+    """[io]
+outdirBase = tgv_m05_output_test
+enableRestart = False
+restartMode = standard""",
+    io_block,
+)
+
+runfile.write_text(src)
+PY
+}
+
+run_case() {
+    local runfile="$1"
+    $EXE --runFile "$runfile"
+}
+
+@test "[$TEST] check for input file, executable, and time-control checker" {
+    test -x $EXE
+    test -s $RUNFILE
+    test -s $CHECKER
+}
+
+@test "[$TEST] fixed dt time stop lands exactly on finalTime and time output cadence" {
+    local outdir="tgv_time_output_fixed"
+    local runfile="input.compressible_tgv_time_output_fixed.ini"
+    cleanup_case "$outdir"
+    make_runfile "$runfile" "$outdir" 50 time 3.0e-4 True 1.0e-4 0.05 time 2.0e-4 False
+
+    run_case "$runfile"
+
+    python3 "$CHECKER" final "$outdir/tgv_diagnostics.csv" 3.0e-4 3 1.0e-12
+    python3 "$CHECKER" roots "$outdir" "0,2,3"
+}
+
+@test "[$TEST] adaptive CFL clips the last step to finalTime" {
+    local outdir="tgv_time_stop_adaptive"
+    local runfile="input.compressible_tgv_time_stop_adaptive.ini"
+    cleanup_case "$outdir"
+    make_runfile "$runfile" "$outdir" 50 time 5.0e-4 False -1.0 0.4 cycles -1.0 False
+
+    run_case "$runfile"
+
+    python3 "$CHECKER" final "$outdir/tgv_diagnostics.csv" 5.0e-4 1 1.0e-12
+}
+
+@test "[$TEST] restart resumes time-based outputs without duplicating a time slice" {
+    local full_outdir="tgv_time_restart_full"
+    local full_runfile="input.compressible_tgv_time_restart_full.ini"
+    local split_outdir="tgv_time_restart_split"
+    local split_runfile_1="input.compressible_tgv_time_restart_split_1.ini"
+    local split_runfile_2="input.compressible_tgv_time_restart_split_2.ini"
+
+    cleanup_case "$full_outdir"
+    cleanup_case "$split_outdir"
+
+    make_runfile "$full_runfile" "$full_outdir" 50 time 4.0e-4 True 1.0e-4 0.05 time 2.0e-4 False
+    run_case "$full_runfile"
+
+    make_runfile "$split_runfile_1" "$split_outdir" 50 time 2.0e-4 True 1.0e-4 0.05 time 2.0e-4 False
+    run_case "$split_runfile_1"
+
+    make_runfile "$split_runfile_2" "$split_outdir" 50 time 4.0e-4 True 1.0e-4 0.05 time 2.0e-4 True
+    run_case "$split_runfile_2"
+
+    python3 "$CHECKER" final "$split_outdir/tgv_diagnostics.csv" 4.0e-4 4 1.0e-12
+    python3 "$CHECKER" roots "$split_outdir" "0,2,4"
+    python3 "$CHECKER" compare-last "$full_outdir/tgv_diagnostics.csv" "$split_outdir/tgv_diagnostics.csv"
+}
